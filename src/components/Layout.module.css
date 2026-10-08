@@ -1,0 +1,15 @@
+/* src/components/Layout.module.css */
+.shell {
+  display: grid; grid-template-columns: var(--sidebar-w) minmax(0, 1fr);
+  height: 100vh; background: var(--color-bg);
+}
+.main { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.header {
+  display: flex; align-items: center; justify-content: space-between; flex: 0 0 var(--header-h);
+  padding: 0 var(--space-9); background: var(--color-surface); border: 1px solid var(--color-border);
+}
+.title { font-size: var(--fs-h1); font-weight: 700; line-height: normal; color: var(--color-text); }
+.content {
+  display: flex; flex-direction: column; gap: var(--space-7); flex: 1 1 auto; min-height: 0;
+  padding: var(--space-8) var(--space-9); overflow-y: auto;
+}

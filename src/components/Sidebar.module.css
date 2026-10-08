@@ -1,0 +1,28 @@
+/* src/components/Sidebar.module.css */
+.sidebar {
+  display: flex; flex-direction: column; gap: var(--space-2);
+  height: 100%; padding: var(--space-7) var(--space-5);
+  background: var(--color-primary); color: #fff; overflow-y: auto;
+}
+.brand {
+  display: flex; align-items: center; gap: var(--space-3);
+  padding-bottom: var(--space-7);
+  font-size: var(--fs-brand); font-weight: 700; line-height: normal;
+}
+.nav { display: flex; flex-direction: column; gap: var(--space-2); }
+.item {
+  display: flex; align-items: center; gap: var(--space-3); width: 100%;
+  padding: var(--space-4) 14px; border: 0; border-radius: var(--radius);
+  background: transparent; color: #fff; cursor: pointer; text-align: left;
+  font-size: var(--fs-lg); font-weight: 400; line-height: normal; white-space: nowrap;
+  transition: background-color 0.15s ease;
+}
+.active { background: var(--color-nav-active); font-weight: 600; }
+.spacer { flex: 1 1 0; min-height: 1px; }
+.user { display: flex; flex-direction: column; gap: var(--space-1); line-height: normal; white-space: nowrap; }
+.name { font-size: var(--fs-md); font-weight: 600; color: #fff; }
+.role { font-size: var(--fs-xs); color: var(--color-nav-role); }
+.logout {
+  padding: 0; border: 0; background: none; cursor: pointer; text-align: left;
+  font-size: var(--fs-sm); line-height: normal; color: var(--color-nav-logout);
+}

@@ -1,0 +1,166 @@
+/* src/pages/Asociados.module.css */
+.filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--space-5);
+}
+
+.summary {
+  font-size: var(--fs-md);
+  line-height: normal;
+  color: var(--color-text-muted);
+}
+
+.viewBtn {
+  background: none;
+  border: none;
+  color: var(--color-primary);
+  font-weight: 600;
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: var(--radius-sm);
+}
+
+.viewBtn:hover {
+  text-decoration: underline;
+}
+
+/* Pantalla Ficha */
+.fichaContainer {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+}
+
+.fichaGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: var(--space-4) var(--space-6);
+}
+
+.fichaItem {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.fichaLabel {
+  font-size: var(--fs-xs);
+  color: var(--color-text-muted);
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.fichaValue {
+  font-size: var(--fs-base);
+  color: var(--color-text);
+  font-weight: 500;
+}
+
+.alumnosList {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-4);
+}
+
+.alumnoCard {
+  background: var(--color-th-bg);
+  border: 1px solid var(--color-border);
+  padding: var(--space-3) var(--space-5);
+  border-radius: var(--radius);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.alumnoNombre {
+  font-size: var(--fs-base);
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.alumnoCurso {
+  font-size: var(--fs-sm);
+  color: var(--color-text-muted);
+}
+
+.emptyText {
+  color: var(--color-text-muted);
+  font-size: var(--fs-base);
+}
+
+.actionRow {
+  display: flex;
+  gap: var(--space-4);
+  margin-top: var(--space-2);
+}
+
+/* Pantalla Formulario */
+.formContainer {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+}
+
+.formFields {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.formRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-5);
+}
+
+.alumnosForm {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.alumnoFormRow {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--space-4);
+}
+
+.removeBtn {
+  height: 48px;
+  padding: 0 var(--space-4);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  color: var(--color-danger);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.removeBtn:hover {
+  background: var(--color-danger-bg);
+}
+
+.addBtn {
+  align-self: flex-start;
+  padding: var(--space-3) var(--space-5);
+  background: var(--color-surface);
+  border: 1.5px dashed var(--color-primary);
+  color: var(--color-primary);
+  font-weight: 600;
+  border-radius: var(--radius);
+  cursor: pointer;
+}
+
+.addBtn:hover {
+  background: var(--color-primary-bg);
+}
+
+.errorMsg {
+  color: var(--color-danger);
+  font-size: var(--fs-base);
+  background: var(--color-danger-bg);
+  padding: var(--space-4);
+  border-radius: var(--radius);
+}

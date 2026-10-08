@@ -1,0 +1,12 @@
+/* src/components/ui/Field.module.css */
+.field { display: flex; flex-direction: column; gap: var(--space-2); }
+.label { font-size: var(--fs-base); font-weight: 600; line-height: normal; color: var(--color-text-label); }
+.control {
+  width: 100%; height: 48px; padding: var(--space-4) 0 var(--space-4) 14px;
+  border: 1.5px solid var(--color-border-field); border-radius: var(--radius);
+  background: var(--color-surface); color: var(--color-text);
+  font-size: var(--fs-base); line-height: normal;
+}
+.control::placeholder { color: var(--color-border-field); opacity: 1; }
+.select { position: relative; display: block; color: var(--color-border-field); white-space: nowrap; }
+.native { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; }

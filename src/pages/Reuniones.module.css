@@ -1,0 +1,117 @@
+/* src/pages/Reuniones.module.css */
+.filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--space-5);
+  margin-bottom: var(--space-5);
+}
+
+.actionBtn {
+  background: none;
+  border: none;
+  color: var(--color-primary);
+  font-weight: 600;
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: var(--radius-sm);
+}
+
+.actionBtn:hover {
+  text-decoration: underline;
+}
+
+/* Pantalla Formulario */
+.formContainer {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+  max-width: 800px;
+}
+
+.formFields {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.formRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-5);
+}
+
+.actionRow {
+  display: flex;
+  gap: var(--space-4);
+  margin-top: var(--space-2);
+}
+
+.errorMsg {
+  color: var(--color-danger);
+  font-size: var(--fs-base);
+  background: var(--color-danger-bg);
+  padding: var(--space-4);
+  border-radius: var(--radius);
+}
+
+/* Pantalla Acta */
+.actaHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-bottom: 1px solid var(--color-border);
+  padding-bottom: var(--space-4);
+  margin-bottom: var(--space-4);
+}
+
+.actaMeta {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.actaTitle {
+  font-size: var(--fs-h3);
+  font-weight: 700;
+  color: var(--color-text);
+}
+
+.actaSub {
+  font-size: var(--fs-sm);
+  color: var(--color-text-muted);
+}
+
+.templateBtn {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border-btn);
+  color: var(--color-text-btn);
+  font-weight: 600;
+  font-size: var(--fs-sm);
+  padding: var(--space-2) var(--space-4);
+  border-radius: var(--radius);
+  cursor: pointer;
+}
+
+.templateBtn:hover {
+  background: var(--color-th-bg);
+}
+
+.actaTextarea {
+  width: 100%;
+  min-height: 340px;
+  padding: var(--space-4);
+  font-family: inherit;
+  font-size: var(--fs-base);
+  line-height: 1.6;
+  border: 1px solid var(--color-border-field);
+  border-radius: var(--radius);
+  background: var(--color-surface);
+  color: var(--color-text);
+  resize: vertical;
+  box-sizing: border-box;
+}
+
+.actaTextarea:focus {
+  outline: 2px solid var(--color-primary);
+}

@@ -1,0 +1,93 @@
+/* src/pages/Caja.module.css */
+.stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: var(--space-5);
+  margin-bottom: var(--space-5);
+}
+
+.stat {
+  gap: var(--space-2);
+}
+
+.statLabel {
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+}
+
+.statValue {
+  font-size: var(--fs-stat);
+  font-weight: 700;
+  color: var(--color-text);
+}
+
+.statValueOk {
+  font-size: var(--fs-stat);
+  font-weight: 700;
+  color: var(--color-ok);
+}
+
+.statValueDanger {
+  font-size: var(--fs-stat);
+  font-weight: 700;
+  color: var(--color-danger);
+}
+
+.filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--space-5);
+  margin-bottom: var(--space-5);
+}
+
+.anularBtn {
+  background: none;
+  border: 1px solid var(--color-border);
+  color: var(--color-danger);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  padding: 4px 8px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.anularBtn:hover {
+  background: var(--color-danger-bg);
+}
+
+/* Pantalla Formulario */
+.formContainer {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+  max-width: 800px;
+}
+
+.formFields {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.formRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-5);
+}
+
+.actionRow {
+  display: flex;
+  gap: var(--space-4);
+  margin-top: var(--space-2);
+}
+
+.errorMsg {
+  color: var(--color-danger);
+  font-size: var(--fs-base);
+  background: var(--color-danger-bg);
+  padding: var(--space-4);
+  border-radius: var(--radius);
+}

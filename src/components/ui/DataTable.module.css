@@ -1,0 +1,74 @@
+/* src/components/ui/DataTable.module.css */
+.table {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-card);
+  overflow: hidden;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+}
+
+.row {
+  display: grid;
+  grid-template-columns: var(--cols);
+  align-items: center;
+  padding: var(--space-4) var(--pr, 16px) var(--space-4) var(--space-5);
+  border-bottom: 1px solid var(--color-border-row);
+  font-size: var(--fs-base);
+  line-height: normal;
+  color: var(--color-text-cell);
+  transition: background-color 0.12s ease;
+}
+
+.row:last-child {
+  border-bottom: none;
+}
+
+.clickable {
+  cursor: pointer;
+}
+
+.clickable:hover {
+  background-color: var(--color-th-bg);
+}
+
+.head {
+  background: var(--color-th-bg);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  color: var(--color-text-th);
+  border-bottom: 1.5px solid var(--color-border);
+}
+
+.cell {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding-right: var(--space-3);
+}
+
+.cell:last-child {
+  padding-right: 0;
+}
+
+.cell button {
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: pointer;
+  font-size: inherit;
+  line-height: inherit;
+  color: var(--color-primary);
+  font-weight: 500;
+  text-decoration: underline;
+}
+
+.cell button:hover {
+  opacity: 0.8;
+}
+
+.empty {
+  padding: var(--space-8);
+  text-align: center;
+  color: var(--color-text-muted);
+  font-size: var(--fs-md);
+}

@@ -1,0 +1,17 @@
+/* src/pages/Dashboard.module.css */
+.stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--space-5); padding-right: 8px; }
+.stat { gap: var(--space-2); }
+.statLabel { font-size: var(--fs-md); line-height: normal; color: var(--color-text-muted); }
+.statValue { font-size: var(--fs-stat); font-weight: 700; line-height: normal; color: var(--color-text); }
+.split { display: grid; grid-template-columns: minmax(0, 1fr) 352px; gap: var(--space-7); align-items: start; }
+.moves { display: flex; flex-direction: column; gap: var(--space-4); }
+.move {
+  display: flex; justify-content: space-between; gap: var(--space-5);
+  padding: 8px 0; border-bottom: 1px solid var(--color-border-row);
+  font-size: var(--fs-base); line-height: normal; white-space: nowrap;
+}
+.moveText { color: var(--color-text); }
+.moveAmount { color: var(--color-text-muted); }
+.actions { display: flex; flex-direction: column; gap: var(--space-4); }
+.actionsTitle { font-size: var(--fs-h3); font-weight: 600; line-height: normal; color: var(--color-text); }
+.note { font-size: var(--fs-sm); line-height: normal; color: var(--color-text-hint); }

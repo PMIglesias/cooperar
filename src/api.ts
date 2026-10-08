@@ -1,0 +1,606 @@
+// src/api.ts
+import { invoke } from "@tauri-apps/api/core";
+
+export type Rol = "Presidente" | "Secretaria" | "Tesorero" | "Superadmin";
+export interface Usuario { id: number; nombre: string; rol: Rol }
+export interface Movimiento { descripcion: string; tipo: "Ingreso" | "Egreso"; monto: number }
+export interface ResumenInicio {
+  saldoCaja: number; cuotasCobradas: number; cuotasTotal: number; conDeuda: number;
+  proximaReunion: string | null; ultimosMovimientos: Movimiento[]; ultimaCopia: string | null;
+}
+export interface ResumenPadron { activos: number; conDeuda: number; exentos: number }
+export type EstadoCuotas = "Al día" | "Con deuda" | "Exento";
+
+export interface AsociadoFila {
+  id: number;
+  apellidoNombre: string;
+  dni: string;
+  telefono: string | null;
+  alumnos: string | null;
+  estadoCuotas: EstadoCuotas;
+  activo: number;
+}
+
+export interface AlumnoItem {
+  id: number;
+  nombre: string;
+  curso: string;
+}
+
+export interface AsociadoDetalle {
+  id: number;
+  apellidoNombre: string;
+  dni: string;
+  telefono: string | null;
+  email: string | null;
+  fechaAlta: string;
+  alumnos: string | null;
+  listaAlumnos: AlumnoItem[];
+  estadoCuotas: EstadoCuotas;
+  exento: number;
+  activo: number;
+}
+
+export interface DatosAsociado {
+  apellidoNombre: string;
+  dni: string;
+  telefono?: string;
+  email?: string;
+  alumnos: { nombre: string; curso: string }[];
+}
+
+export interface Filtros { busqueda: string; estadoCuotas: string; estado: string }
+
+// Cuotas y Pagos
+export interface PagoFila {
+  id: number;
+  asociadoId: number;
+  apellidoNombre: string;
+  dni: string;
+  periodo: string;
+  fechaPago: string;
+  monto: number;
+  medio: string;
+  comprobante: string | null;
+  registradoPor: string;
+}
+
+export interface DatosPago {
+  asociadoId: number;
+  periodo: string;
+  monto: number;
+  medio: string;
+  comprobante?: string;
+}
+
+// Caja
+export interface MovimientoCajaFila {
+  id: number;
+  fecha: string;
+  tipo: "Ingreso" | "Egreso";
+  categoria: string;
+  descripcion: string;
+  monto: number;
+  comprobante: string | null;
+  anulado: number;
+}
+
+export interface DatosMovimientoCaja {
+  tipo: "Ingreso" | "Egreso";
+  categoria: string;
+  descripcion: string;
+  monto: number;
+  comprobante?: string;
+}
+
+export interface ResumenCaja {
+  saldoActual: number;
+  ingresosMes: number;
+  egresosMes: number;
+  totalMovimientos: number;
+}
+
+// Reuniones
+export interface ReunionFila {
+  id: number;
+  fecha: string;
+  tipo: "Comisión" | "Asamblea";
+  temas: string;
+  acta: string | null;
+  asistentesCount: number;
+}
+
+export interface DatosReunion {
+  fecha: string;
+  tipo: "Comisión" | "Asamblea";
+  temas: string;
+}
+
+// Rendiciones
+export interface RendicionFila {
+  id: number;
+  periodo: string;
+  desde: string;
+  hasta: string;
+  generadaEn: string;
+  generadaPor: string;
+  estado: "Borrador" | "Aprobada";
+  aprobadaPor: string | null;
+  aprobadaEn: string | null;
+  totalIngresos: number;
+  totalEgresos: number;
+  saldoPeriodo: number;
+}
+
+export interface DatosRendicion {
+  periodo: string;
+  desde: string;
+  hasta: string;
+}
+
+// Usuarios
+export interface UsuarioFila {
+  id: number;
+  nombre: string;
+  dni: string;
+  email: string | null;
+  rol: Rol;
+  activo: number;
+}
+
+export interface DatosUsuario {
+  nombre: string;
+  dni: string;
+  email?: string;
+  rol: Rol;
+  clave?: string;
+}
+
+export interface CopiaSeguridadFila {
+  nombreArchivo: string;
+  fecha: string;
+  tamanoBytes: number;
+}
+
+export const DEMO_USUARIOS = [
+  { dni: "10000001", nombre: "Administrador General", rol: "Superadmin" as Rol, clave: "admin123" },
+  { dni: "20000002", nombre: "Carlos Gómez", rol: "Presidente" as Rol, clave: "admin123" },
+  { dni: "30000003", nombre: "Mariana López", rol: "Secretaria" as Rol, clave: "admin123" },
+  { dni: "40000004", nombre: "Roberto Fernández", rol: "Tesorero" as Rol, clave: "admin123" },
+];
+
+const isTauri = typeof window !== "undefined" && Boolean((window as unknown as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__);
+
+// In-Memory Mock Store for Browser Preview Mode
+let mockAsociados: AsociadoDetalle[] = [
+  {
+    id: 1, apellidoNombre: "Álvarez, Marcos", dni: "32111222", telefono: "11-4567-8901", email: "marcos.alvarez@email.com",
+    fechaAlta: "2026-07-01", alumnos: "Lucía Álvarez (3° A)", listaAlumnos: [{ id: 1, nombre: "Lucía Álvarez", curso: "3° A" }],
+    estadoCuotas: "Al día", exento: 0, activo: 1,
+  },
+  {
+    id: 2, apellidoNombre: "Fernández, Valeria", dni: "29888777", telefono: "11-9876-5432", email: "valeria.fernandez@email.com",
+    fechaAlta: "2026-04-01", alumnos: "Mateo Fernández (5° B), Sofía Fernández (1° A)", listaAlumnos: [{ id: 2, nombre: "Mateo Fernández", curso: "5° B" }, { id: 3, nombre: "Sofía Fernández", curso: "1° A" }],
+    estadoCuotas: "Con deuda", exento: 0, activo: 1,
+  },
+  {
+    id: 3, apellidoNombre: "Gómez, Santiago", dni: "34555666", telefono: "11-2233-4455", email: "santiago.gomez@email.com",
+    fechaAlta: "2025-10-01", alumnos: "Ignacio Gómez (2° C)", listaAlumnos: [{ id: 4, nombre: "Ignacio Gómez", curso: "2° C" }],
+    estadoCuotas: "Exento", exento: 1, activo: 1,
+  },
+  {
+    id: 4, apellidoNombre: "López, Mariana", dni: "31222333", telefono: "11-6677-8899", email: "mariana.lopez@email.com",
+    fechaAlta: "2026-08-01", alumnos: "Camila López (4° A)", listaAlumnos: [{ id: 5, nombre: "Camila López", curso: "4° A" }],
+    estadoCuotas: "Al día", exento: 0, activo: 1,
+  },
+  {
+    id: 5, apellidoNombre: "Martínez, Diego", dni: "28777666", telefono: "11-3344-5566", email: "diego.martinez@email.com",
+    fechaAlta: "2026-05-01", alumnos: "Tomás Martínez (6° B)", listaAlumnos: [{ id: 6, nombre: "Tomás Martínez", curso: "6° B" }],
+    estadoCuotas: "Al día", exento: 0, activo: 1,
+  },
+  {
+    id: 6, apellidoNombre: "Rodríguez, Laura", dni: "33444555", telefono: "11-5566-7788", email: "laura.rodriguez@email.com",
+    fechaAlta: "2026-09-01", alumnos: "Benjamín Rodríguez (1° B)", listaAlumnos: [{ id: 7, nombre: "Benjamín Rodríguez", curso: "1° B" }],
+    estadoCuotas: "Al día", exento: 0, activo: 1,
+  },
+  {
+    id: 7, apellidoNombre: "Romero, Pablo", dni: "30111444", telefono: "11-7788-9900", email: "pablo.romero@email.com",
+    fechaAlta: "2026-06-01", alumnos: "Martina Romero (2° A)", listaAlumnos: [{ id: 8, nombre: "Martina Romero", curso: "2° A" }],
+    estadoCuotas: "Al día", exento: 0, activo: 1,
+  },
+  {
+    id: 8, apellidoNombre: "Sánchez, Elena", dni: "27999111", telefono: "11-8899-0011", email: "elena.sanchez@email.com",
+    fechaAlta: "2026-02-01", alumnos: "Joaquín Sánchez (5° A)", listaAlumnos: [{ id: 9, nombre: "Joaquín Sánchez", curso: "5° A" }],
+    estadoCuotas: "Al día", exento: 0, activo: 1,
+  },
+];
+
+let mockPagos: PagoFila[] = [
+  { id: 1, asociadoId: 1, apellidoNombre: "Álvarez, Marcos", dni: "32111222", periodo: "2026-10", fechaPago: "2026-10-04", monto: 8000, medio: "Efectivo", comprobante: "REC-001", registradoPor: "Roberto Fernández" },
+  { id: 2, asociadoId: 4, apellidoNombre: "López, Mariana", dni: "31222333", periodo: "2026-10", fechaPago: "2026-10-05", monto: 8000, medio: "Transferencia", comprobante: "TRF-1029", registradoPor: "Roberto Fernández" },
+  { id: 3, asociadoId: 5, apellidoNombre: "Martínez, Diego", dni: "28777666", periodo: "2026-10", fechaPago: "2026-10-05", monto: 8000, medio: "Efectivo", comprobante: "REC-002", registradoPor: "Roberto Fernández" },
+  { id: 4, asociadoId: 6, apellidoNombre: "Rodríguez, Laura", dni: "33444555", periodo: "2026-10", fechaPago: "2026-10-06", monto: 8000, medio: "Transferencia", comprobante: "TRF-1033", registradoPor: "Roberto Fernández" },
+  { id: 5, asociadoId: 7, apellidoNombre: "Romero, Pablo", dni: "30111444", periodo: "2026-10", fechaPago: "2026-10-06", monto: 8000, medio: "Efectivo", comprobante: "REC-003", registradoPor: "Roberto Fernández" },
+  { id: 6, asociadoId: 8, apellidoNombre: "Sánchez, Elena", dni: "27999111", periodo: "2026-10", fechaPago: "2026-10-07", monto: 8000, medio: "Transferencia", comprobante: "TRF-1045", registradoPor: "Roberto Fernández" },
+];
+
+let mockMovimientos: MovimientoCajaFila[] = [
+  { id: 5, fecha: "2026-10-06", tipo: "Ingreso", categoria: "Cuotas", descripcion: "Cobro cuotas mes en curso", monto: 48000, comprobante: "LOT-102", anulado: 0 },
+  { id: 4, fecha: "2026-10-04", tipo: "Egreso", categoria: "Mantenimiento", descripcion: "Reparación luminarias patio y pasillos", monto: 45000, comprobante: "FAC-8890", anulado: 0 },
+  { id: 3, fecha: "2026-10-02", tipo: "Ingreso", categoria: "Eventos", descripcion: "Recaudación kermesse familiar escolar", monto: 185000, comprobante: "ACT-012", anulado: 0 },
+  { id: 2, fecha: "2026-09-29", tipo: "Egreso", categoria: "Insumos", descripcion: "Compra de artículos de limpieza y desinfección", monto: 25400, comprobante: "FAC-1102", anulado: 0 },
+  { id: 1, fecha: "2026-09-27", tipo: "Ingreso", categoria: "Cuotas", descripcion: "Cobro cuotas societarias mes anterior", monto: 56000, comprobante: "LOT-101", anulado: 0 },
+];
+
+let mockReuniones: ReunionFila[] = [
+  { id: 1, fecha: "2026-10-19", tipo: "Comisión", temas: "Planificación mejoras edilicias de verano, presupuesto pintura y balance de cuotas.", acta: null, asistentesCount: 0 },
+  { id: 2, fecha: "2026-09-17", tipo: "Asamblea", temas: "Aprobación de memoria y balance anual. Renovación parcial de autoridades.", acta: "En la ciudad, reunidos los miembros en asamblea ordinaria, se aprueba por unanimidad la memoria y balance del ejercicio anterior. Se ratifican los cargos directivos.", asistentesCount: 18 },
+];
+
+let mockRendiciones: RendicionFila[] = [
+  { id: 1, periodo: "Septiembre 2026", desde: "2026-09-01", hasta: "2026-09-30", generadaEn: "2026-10-01 10:00:00", generadaPor: "Roberto Fernández", estado: "Aprobada", aprobadaPor: "Carlos Gómez", aprobadaEn: "2026-10-02 14:30:00", totalIngresos: 241000, totalEgresos: 70400, saldoPeriodo: 170600 },
+];
+
+let mockUsuarios: UsuarioFila[] = [
+  { id: 1, nombre: "Administrador General", dni: "10000001", email: "admin@cooperar.local", rol: "Superadmin", activo: 1 },
+  { id: 2, nombre: "Carlos Gómez", dni: "20000002", email: "presidente@cooperar.local", rol: "Presidente", activo: 1 },
+  { id: 3, nombre: "Mariana López", dni: "30000003", email: "secretaria@cooperar.local", rol: "Secretaria", activo: 1 },
+  { id: 4, nombre: "Roberto Fernández", dni: "40000004", email: "tesorero@cooperar.local", rol: "Tesorero", activo: 1 },
+];
+
+let mockCopias: CopiaSeguridadFila[] = [
+  { nombreArchivo: "cooperar_backup_20261007_052000.db", fecha: "2026-10-07 05:20:00", tamanoBytes: 61440 },
+];
+
+let mockConfiguracion: Record<string, string> = {
+  monto_cuota: "8000",
+  ultima_copia: "07/10/2026 05:20",
+};
+
+export const api = {
+  // Autenticación
+  login: async (dni: string, clave: string): Promise<Usuario> => {
+    if (isTauri) return invoke<Usuario>("login", { dni, clave });
+    const cleanDni = dni.trim();
+    const user = DEMO_USUARIOS.find((u) => u.dni === cleanDni && (u.clave === clave || clave === "admin123"));
+    if (user) {
+      return { id: DEMO_USUARIOS.indexOf(user) + 1, nombre: user.nombre, rol: user.rol };
+    }
+    throw new Error("DNI o contraseña incorrectos");
+  },
+  logout: async (): Promise<void> => {
+    if (isTauri) return invoke<void>("logout");
+  },
+
+  // Dashboard
+  resumenInicio: async (): Promise<ResumenInicio> => {
+    if (isTauri) return invoke<ResumenInicio>("resumen_inicio");
+    const activos = mockAsociados.filter((a) => a.activo === 1);
+    return {
+      saldoCaja: 218600,
+      cuotasCobradas: mockPagos.filter((p) => p.periodo === "2026-10").length,
+      cuotasTotal: activos.filter((a) => a.exento === 0).length,
+      conDeuda: activos.filter((a) => a.estadoCuotas === "Con deuda").length,
+      proximaReunion: "19/10 · Comisión",
+      ultimosMovimientos: mockMovimientos.slice(0, 4).map((m) => ({ descripcion: m.descripcion, tipo: m.tipo, monto: m.monto })),
+      ultimaCopia: mockConfiguracion.ultima_copia || "07/10/2026 05:20",
+    };
+  },
+  resumenPadron: async (): Promise<ResumenPadron> => {
+    if (isTauri) return invoke<ResumenPadron>("resumen_padron");
+    const activos = mockAsociados.filter((a) => a.activo === 1);
+    return {
+      activos: activos.length,
+      conDeuda: activos.filter((a) => a.estadoCuotas === "Con deuda").length,
+      exentos: activos.filter((a) => a.exento === 1).length,
+    };
+  },
+
+  // Asociados
+  listarAsociados: async (f: Filtros): Promise<AsociadoFila[]> => {
+    if (isTauri) return invoke<AsociadoFila[]>("listar_asociados", { ...f });
+    return mockAsociados
+      .filter((a) => {
+        const matchEstado = f.estado === "Todos" ? true : f.estado === "Activos" || f.estado === "Activo" ? a.activo === 1 : a.activo === 0;
+        const matchBusqueda = !f.busqueda || a.apellidoNombre.toLowerCase().includes(f.busqueda.toLowerCase()) || a.dni.includes(f.busqueda);
+        const matchCuotas = f.estadoCuotas === "Todos" || a.estadoCuotas === f.estadoCuotas;
+        return matchEstado && matchBusqueda && matchCuotas;
+      })
+      .map((a) => ({
+        id: a.id,
+        apellidoNombre: a.apellidoNombre,
+        dni: a.dni,
+        telefono: a.telefono,
+        alumnos: a.alumnos,
+        estadoCuotas: a.estadoCuotas,
+        activo: a.activo,
+      }));
+  },
+  obtenerAsociado: async (id: number): Promise<AsociadoDetalle> => {
+    if (isTauri) return invoke<AsociadoDetalle>("obtener_asociado", { id });
+    const found = mockAsociados.find((a) => a.id === id);
+    if (!found) throw new Error("Asociado no encontrado");
+    return found;
+  },
+  crearAsociado: async (datos: DatosAsociado): Promise<number> => {
+    if (isTauri) return invoke<number>("crear_asociado", { datos });
+    const id = Date.now();
+    const listaAlumnos: AlumnoItem[] = datos.alumnos
+      .filter((a) => a.nombre.trim().length > 0)
+      .map((a, idx) => ({ id: id + idx + 1, nombre: a.nombre.trim(), curso: a.curso.trim() }));
+    const alumnosStr = listaAlumnos.map((a) => `${a.nombre} (${a.curso})`).join(", ");
+
+    const nuevo: AsociadoDetalle = {
+      id,
+      apellidoNombre: datos.apellidoNombre.trim(),
+      dni: datos.dni.trim(),
+      telefono: datos.telefono?.trim() || null,
+      email: datos.email?.trim() || null,
+      fechaAlta: new Date().toISOString().split("T")[0],
+      alumnos: alumnosStr || null,
+      listaAlumnos,
+      estadoCuotas: "Con deuda",
+      exento: 0,
+      activo: 1,
+    };
+    mockAsociados.push(nuevo);
+    return id;
+  },
+  actualizarAsociado: async (id: number, datos: DatosAsociado): Promise<void> => {
+    if (isTauri) return invoke<void>("actualizar_asociado", { id, datos });
+    const idx = mockAsociados.findIndex((a) => a.id === id);
+    if (idx >= 0) {
+      const listaAlumnos: AlumnoItem[] = datos.alumnos
+        .filter((a) => a.nombre.trim().length > 0)
+        .map((a, i) => ({ id: id + i + 1, nombre: a.nombre.trim(), curso: a.curso.trim() }));
+      const alumnosStr = listaAlumnos.map((a) => `${a.nombre} (${a.curso})`).join(", ");
+
+      mockAsociados[idx] = {
+        ...mockAsociados[idx],
+        apellidoNombre: datos.apellidoNombre.trim(),
+        dni: datos.dni.trim(),
+        telefono: datos.telefono?.trim() || null,
+        email: datos.email?.trim() || null,
+        alumnos: alumnosStr || null,
+        listaAlumnos,
+      };
+    }
+  },
+  marcarExento: async (id: number, exento: boolean): Promise<void> => {
+    if (isTauri) return invoke<void>("marcar_exento", { id, exento });
+    const a = mockAsociados.find((x) => x.id === id);
+    if (a) {
+      a.exento = exento ? 1 : 0;
+      a.estadoCuotas = exento ? "Exento" : "Al día";
+    }
+  },
+  darDeBaja: async (id: number): Promise<void> => {
+    if (isTauri) return invoke<void>("dar_de_baja", { id });
+    const a = mockAsociados.find((x) => x.id === id);
+    if (a) a.activo = 0;
+  },
+  reactivarAsociado: async (id: number): Promise<void> => {
+    if (isTauri) return invoke<void>("reactivar_asociado", { id });
+    const a = mockAsociados.find((x) => x.id === id);
+    if (a) a.activo = 1;
+  },
+
+  // Cuotas y Pagos
+  listarPagos: async (busqueda = "", periodo = "Todos"): Promise<PagoFila[]> => {
+    if (isTauri) return invoke<PagoFila[]>("listar_pagos", { busqueda, periodo });
+    return mockPagos.filter((p) => {
+      const matchPeriodo = periodo === "Todos" || !periodo || p.periodo === periodo;
+      const matchBusqueda = !busqueda || p.apellidoNombre.toLowerCase().includes(busqueda.toLowerCase()) || p.dni.includes(busqueda) || (p.comprobante && p.comprobante.includes(busqueda));
+      return matchPeriodo && matchBusqueda;
+    });
+  },
+  obtenerHistorialPagosAsociado: async (asociadoId: number): Promise<PagoFila[]> => {
+    if (isTauri) return invoke<PagoFila[]>("obtener_historial_pagos_asociado", { asociadoId });
+    return mockPagos.filter((p) => p.asociadoId === asociadoId);
+  },
+  registrarPago: async (datos: DatosPago): Promise<number> => {
+    if (isTauri) return invoke<number>("registrar_pago", { datos });
+    const id = Date.now();
+    const asociado = mockAsociados.find((a) => a.id === datos.asociadoId);
+    const nombre = asociado ? asociado.apellidoNombre : "Asociado";
+    const nuevoPago: PagoFila = {
+      id,
+      asociadoId: datos.asociadoId,
+      apellidoNombre: nombre,
+      dni: asociado ? asociado.dni : "",
+      periodo: datos.periodo,
+      fechaPago: new Date().toISOString().split("T")[0],
+      monto: datos.monto,
+      medio: datos.medio,
+      comprobante: datos.comprobante || `REC-${id.toString().slice(-4)}`,
+      registradoPor: "Usuario Actual",
+    };
+    mockPagos.unshift(nuevoPago);
+
+    // Actualizar estado cuotas del asociado
+    if (asociado) {
+      asociado.estadoCuotas = "Al día";
+    }
+
+    // Registrar en caja
+    mockMovimientos.unshift({
+      id: Date.now() + 1,
+      fecha: nuevoPago.fechaPago,
+      tipo: "Ingreso",
+      categoria: "Cuotas",
+      descripcion: `Cobro cuota ${datos.periodo} - ${nombre}`,
+      monto: datos.monto,
+      comprobante: nuevoPago.comprobante,
+      anulado: 0,
+    });
+
+    return id;
+  },
+
+  // Caja
+  listarMovimientosCaja: async (tipo = "Todos", categoria = "Todas", busqueda = ""): Promise<MovimientoCajaFila[]> => {
+    if (isTauri) return invoke<MovimientoCajaFila[]>("listar_movimientos_caja", { tipo, categoria, busqueda });
+    return mockMovimientos.filter((m) => {
+      const matchTipo = tipo === "Todos" || m.tipo === tipo;
+      const matchCat = categoria === "Todas" || m.categoria === categoria;
+      const matchBusqueda = !busqueda || m.descripcion.toLowerCase().includes(busqueda.toLowerCase()) || (m.comprobante && m.comprobante.toLowerCase().includes(busqueda.toLowerCase()));
+      return matchTipo && matchCat && matchBusqueda;
+    });
+  },
+  resumenCaja: async (): Promise<ResumenCaja> => {
+    if (isTauri) return invoke<ResumenCaja>("resumen_caja");
+    const activos = mockMovimientos.filter((m) => m.anulado === 0);
+    const ingresos = activos.filter((m) => m.tipo === "Ingreso").reduce((acc, m) => acc + m.monto, 0);
+    const egresos = activos.filter((m) => m.tipo === "Egreso").reduce((acc, m) => acc + m.monto, 0);
+    return {
+      saldoActual: ingresos - egresos,
+      ingresosMes: ingresos,
+      egresosMes: egresos,
+      totalMovimientos: activos.length,
+    };
+  },
+  crearMovimientoCaja: async (datos: DatosMovimientoCaja): Promise<number> => {
+    if (isTauri) return invoke<number>("crear_movimiento_caja", { datos });
+    const id = Date.now();
+    mockMovimientos.unshift({
+      id,
+      fecha: new Date().toISOString().split("T")[0],
+      tipo: datos.tipo,
+      categoria: datos.categoria,
+      descripcion: datos.descripcion,
+      monto: datos.monto,
+      comprobante: datos.comprobante || null,
+      anulado: 0,
+    });
+    return id;
+  },
+  anularMovimientoCaja: async (id: number): Promise<void> => {
+    if (isTauri) return invoke<void>("anular_movimiento_caja", { id });
+    const m = mockMovimientos.find((x) => x.id === id);
+    if (m) m.anulado = 1;
+  },
+
+  // Reuniones
+  listarReuniones: async (): Promise<ReunionFila[]> => {
+    if (isTauri) return invoke<ReunionFila[]>("listar_reuniones");
+    return mockReuniones;
+  },
+  crearReunion: async (datos: DatosReunion): Promise<number> => {
+    if (isTauri) return invoke<number>("crear_reunion", { datos });
+    const id = Date.now();
+    mockReuniones.unshift({
+      id,
+      fecha: datos.fecha,
+      tipo: datos.tipo,
+      temas: datos.temas,
+      acta: null,
+      asistentesCount: 0,
+    });
+    return id;
+  },
+  guardarActa: async (id: number, acta: string): Promise<void> => {
+    if (isTauri) return invoke<void>("guardar_acta", { id, acta });
+    const r = mockReuniones.find((x) => x.id === id);
+    if (r) r.acta = acta;
+  },
+
+  // Rendiciones
+  listarRendiciones: async (): Promise<RendicionFila[]> => {
+    if (isTauri) return invoke<RendicionFila[]>("listar_rendiciones");
+    return mockRendiciones;
+  },
+  crearRendicion: async (datos: DatosRendicion): Promise<number> => {
+    if (isTauri) return invoke<number>("crear_rendicion", { datos });
+    const id = Date.now();
+    mockRendiciones.unshift({
+      id,
+      periodo: datos.periodo,
+      desde: datos.desde,
+      hasta: datos.hasta,
+      generadaEn: new Date().toLocaleString("es-AR"),
+      generadaPor: "Usuario Actual",
+      estado: "Borrador",
+      aprobadaPor: null,
+      aprobadaEn: null,
+      totalIngresos: 241000,
+      totalEgresos: 70400,
+      saldoPeriodo: 170600,
+    });
+    return id;
+  },
+  aprobarRendicion: async (id: number): Promise<void> => {
+    if (isTauri) return invoke<void>("aprobar_rendicion", { id });
+    const r = mockRendiciones.find((x) => x.id === id);
+    if (r) {
+      r.estado = "Aprobada";
+      r.aprobadaPor = "Presidente";
+      r.aprobadaEn = new Date().toLocaleString("es-AR");
+    }
+  },
+
+  // Usuarios
+  listarUsuarios: async (): Promise<UsuarioFila[]> => {
+    if (isTauri) return invoke<UsuarioFila[]>("listar_usuarios");
+    return mockUsuarios;
+  },
+  crearUsuario: async (datos: DatosUsuario): Promise<number> => {
+    if (isTauri) return invoke<number>("crear_usuario", { datos });
+    const id = Date.now();
+    mockUsuarios.push({
+      id,
+      nombre: datos.nombre,
+      dni: datos.dni,
+      email: datos.email || null,
+      rol: datos.rol,
+      activo: 1,
+    });
+    return id;
+  },
+  actualizarUsuario: async (id: number, datos: DatosUsuario): Promise<void> => {
+    if (isTauri) return invoke<void>("actualizar_usuario", { id, datos });
+    const u = mockUsuarios.find((x) => x.id === id);
+    if (u) {
+      u.nombre = datos.nombre;
+      u.dni = datos.dni;
+      u.email = datos.email || null;
+      u.rol = datos.rol;
+    }
+  },
+  cambiarEstadoUsuario: async (id: number, activo: boolean): Promise<void> => {
+    if (isTauri) return invoke<void>("cambiar_estado_usuario", { id, activo });
+    const u = mockUsuarios.find((x) => x.id === id);
+    if (u) u.activo = activo ? 1 : 0;
+  },
+
+  // Respaldo y Configuración
+  crearCopiaSeguridad: async (): Promise<string> => {
+    if (isTauri) return invoke<string>("crear_copia_seguridad");
+    const name = `cooperar_backup_${Date.now()}.db`;
+    mockCopias.unshift({
+      nombreArchivo: name,
+      fecha: new Date().toLocaleString("es-AR"),
+      tamanoBytes: 61440,
+    });
+    mockConfiguracion.ultima_copia = new Date().toLocaleString("es-AR");
+    return name;
+  },
+  listarCopiasSeguridad: async (): Promise<CopiaSeguridadFila[]> => {
+    if (isTauri) return invoke<CopiaSeguridadFila[]>("listar_copias_seguridad");
+    return mockCopias;
+  },
+  obtenerConfiguracion: async (clave: string): Promise<string | null> => {
+    if (isTauri) return invoke<string | null>("obtener_configuracion", { clave });
+    return mockConfiguracion[clave] || null;
+  },
+  guardarConfiguracion: async (clave: string, valor: string): Promise<void> => {
+    if (isTauri) return invoke<void>("guardar_configuracion", { clave, valor });
+    mockConfiguracion[clave] = valor;
+  },
+  obtenerRutaDatos: async (): Promise<string> => {
+    if (isTauri) return invoke<string>("obtener_ruta_datos");
+    return "./datos";
+  },
+};
+
+export const money = (n: number) => `$ ${n.toLocaleString("es-AR")}`;
+export const signedMoney = (tipo: string, n: number) => `${tipo === "Ingreso" ? "+" : "-"} ${money(n)}`;

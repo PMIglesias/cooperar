@@ -1,0 +1,50 @@
+/* src/pages/Login.module.css */
+.page { position: relative; display: flex; align-items: center; justify-content: center; height: 100vh; background: var(--color-bg); }
+.card {
+  display: flex; flex-direction: column; align-items: center; gap: var(--space-6);
+  width: 537px; max-width: calc(100% - 32px); padding: 40px;
+  background: var(--color-surface); border: 1px solid var(--color-border-login); border-radius: var(--radius-login);
+}
+.brand { font-size: var(--fs-login); font-weight: 700; line-height: normal; color: var(--color-primary); }
+.subtitle { font-size: var(--fs-base); line-height: normal; color: var(--color-text-muted); }
+.hint, .error { font-size: var(--fs-sm); line-height: normal; white-space: nowrap; text-align: center; }
+.hint { color: var(--color-text-hint); }
+.error { color: var(--color-danger); }
+.demoBox {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-3);
+  width: 100%;
+  max-width: 420px;
+  padding-top: var(--space-4);
+  border-top: 1px dashed var(--color-border);
+}
+.demoTitle {
+  font-size: var(--fs-xs);
+  color: var(--color-text-muted);
+  font-weight: 500;
+}
+.demoButtons {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: var(--space-2);
+}
+.demoBtn {
+  background: var(--color-th-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  padding: 6px 12px;
+  font-size: var(--fs-xs);
+  font-weight: 500;
+  color: var(--color-text);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.demoBtn:hover {
+  background: var(--color-primary-bg);
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+}
+.footer { position: absolute; left: 20px; bottom: 14px; font-size: 13px; line-height: normal; color: var(--color-text-footer); }
