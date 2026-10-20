@@ -16,6 +16,38 @@ fn auth(st: &State<AppState>) -> R<Usuario> {
     g.clone().ok_or_else(|| "Sesión no iniciada".to_string())
 }
 
+fn auth_superadmin(st: &State<AppState>) -> R<Usuario> {
+    let u = auth(st)?;
+    if u.rol != "Superadmin" {
+        return Err("Acceso denegado: sólo el Superadministrador puede acceder a esta sección".to_string());
+    }
+    Ok(u)
+}
+
+fn auth_secretaria_o_admin(st: &State<AppState>) -> R<Usuario> {
+    let u = auth(st)?;
+    if u.rol != "Secretaria" && u.rol != "Superadmin" {
+        return Err("Acceso denegado: sólo la Secretaría o el Superadministrador pueden gestionar asociados y actas".to_string());
+    }
+    Ok(u)
+}
+
+fn auth_tesorero_o_admin(st: &State<AppState>) -> R<Usuario> {
+    let u = auth(st)?;
+    if u.rol != "Tesorero" && u.rol != "Superadmin" {
+        return Err("Acceso denegado: sólo la Tesorería o el Superadministrador pueden registrar pagos, movimientos de caja o rendiciones".to_string());
+    }
+    Ok(u)
+}
+
+fn auth_presidente_o_admin(st: &State<AppState>) -> R<Usuario> {
+    let u = auth(st)?;
+    if u.rol != "Presidente" && u.rol != "Superadmin" {
+        return Err("Acceso denegado: sólo la Presidencia o el Superadministrador pueden aprobar rendiciones de cuentas".to_string());
+    }
+    Ok(u)
+}
+
 fn one(db: &Connection, sql: &str) -> R<i64> {
     db.query_row(sql, [], |r| r.get(0)).map_err(s)
 }
@@ -217,7 +249,7 @@ pub struct DatosAsociado {
 
 #[tauri::command]
 pub fn crear_asociado(st: State<AppState>, datos: DatosAsociado) -> R<i64> {
-    auth(&st)?;
+    auth_secretaria_o_admin(&st)?;
     let mut db = st.db.lock().map_err(s)?;
     let tx = db.transaction().map_err(s)?;
     tx.execute(
@@ -237,7 +269,7 @@ pub fn crear_asociado(st: State<AppState>, datos: DatosAsociado) -> R<i64> {
 
 #[tauri::command]
 pub fn actualizar_asociado(st: State<AppState>, id: i64, datos: DatosAsociado) -> R<()> {
-    auth(&st)?;
+    auth_secretaria_o_admin(&st)?;
     let mut db = st.db.lock().map_err(s)?;
     let tx = db.transaction().map_err(s)?;
     tx.execute(
@@ -256,7 +288,7 @@ pub fn actualizar_asociado(st: State<AppState>, id: i64, datos: DatosAsociado) -
 
 #[tauri::command]
 pub fn marcar_exento(st: State<AppState>, id: i64, exento: bool) -> R<()> {
-    auth(&st)?;
+    auth_secretaria_o_admin(&st)?;
     let db = st.db.lock().map_err(s)?;
     db.execute("UPDATE asociados SET exento=?1 WHERE id=?2", params![exento as i64, id]).map_err(s)?;
     Ok(())
@@ -264,7 +296,7 @@ pub fn marcar_exento(st: State<AppState>, id: i64, exento: bool) -> R<()> {
 
 #[tauri::command]
 pub fn dar_de_baja(st: State<AppState>, id: i64) -> R<()> {
-    auth(&st)?;
+    auth_secretaria_o_admin(&st)?;
     let db = st.db.lock().map_err(s)?;
     db.execute("UPDATE asociados SET activo=0 WHERE id=?1", params![id]).map_err(s)?;
     Ok(())
@@ -272,7 +304,7 @@ pub fn dar_de_baja(st: State<AppState>, id: i64) -> R<()> {
 
 #[tauri::command]
 pub fn reactivar_asociado(st: State<AppState>, id: i64) -> R<()> {
-    auth(&st)?;
+    auth_secretaria_o_admin(&st)?;
     let db = st.db.lock().map_err(s)?;
     db.execute("UPDATE asociados SET activo=1 WHERE id=?1", params![id]).map_err(s)?;
     Ok(())
@@ -356,7 +388,7 @@ pub struct DatosPago {
 
 #[tauri::command]
 pub fn registrar_pago(st: State<AppState>, datos: DatosPago) -> R<i64> {
-    let u = auth(&st)?;
+    let u = auth_tesorero_o_admin(&st)?;
     let mut db = st.db.lock().map_err(s)?;
     let tx = db.transaction().map_err(s)?;
 
@@ -452,7 +484,7 @@ pub struct DatosMovimientoCaja {
 
 #[tauri::command]
 pub fn crear_movimiento_caja(st: State<AppState>, datos: DatosMovimientoCaja) -> R<i64> {
-    auth(&st)?;
+    auth_tesorero_o_admin(&st)?;
     let db = st.db.lock().map_err(s)?;
     db.execute(
         "INSERT INTO movimientos_caja(fecha, tipo, categoria, descripcion, monto, comprobante) VALUES(date('now','localtime'), ?1, ?2, ?3, ?4, ?5)",
@@ -463,7 +495,7 @@ pub fn crear_movimiento_caja(st: State<AppState>, datos: DatosMovimientoCaja) ->
 
 #[tauri::command]
 pub fn anular_movimiento_caja(st: State<AppState>, id: i64) -> R<()> {
-    auth(&st)?;
+    auth_tesorero_o_admin(&st)?;
     let db = st.db.lock().map_err(s)?;
     db.execute("UPDATE movimientos_caja SET anulado=1 WHERE id=?1", params![id]).map_err(s)?;
     Ok(())
@@ -515,7 +547,7 @@ pub struct DatosReunion {
 
 #[tauri::command]
 pub fn crear_reunion(st: State<AppState>, datos: DatosReunion) -> R<i64> {
-    auth(&st)?;
+    auth_secretaria_o_admin(&st)?;
     let db = st.db.lock().map_err(s)?;
     db.execute(
         "INSERT INTO reuniones(fecha, tipo, temas) VALUES(?1, ?2, ?3)",
@@ -526,7 +558,7 @@ pub fn crear_reunion(st: State<AppState>, datos: DatosReunion) -> R<i64> {
 
 #[tauri::command]
 pub fn guardar_acta(st: State<AppState>, id: i64, acta: String) -> R<()> {
-    auth(&st)?;
+    auth_secretaria_o_admin(&st)?;
     let db = st.db.lock().map_err(s)?;
     db.execute("UPDATE reuniones SET acta=?1 WHERE id=?2", params![acta.trim(), id]).map_err(s)?;
     Ok(())
@@ -590,7 +622,7 @@ pub struct DatosRendicion {
 
 #[tauri::command]
 pub fn crear_rendicion(st: State<AppState>, datos: DatosRendicion) -> R<i64> {
-    let u = auth(&st)?;
+    let u = auth_tesorero_o_admin(&st)?;
     let db = st.db.lock().map_err(s)?;
     db.execute(
         "INSERT INTO rendiciones(periodo, desde, hasta, generada_en, generada_por, estado) VALUES(?1, ?2, ?3, datetime('now','localtime'), ?4, 'Borrador')",
@@ -601,12 +633,20 @@ pub fn crear_rendicion(st: State<AppState>, datos: DatosRendicion) -> R<i64> {
 
 #[tauri::command]
 pub fn aprobar_rendicion(st: State<AppState>, id: i64) -> R<()> {
-    let u = auth(&st)?;
+    let u = auth_presidente_o_admin(&st)?;
     let db = st.db.lock().map_err(s)?;
     db.execute(
         "UPDATE rendiciones SET estado='Aprobada', aprobada_por=?1, aprobada_en=datetime('now','localtime') WHERE id=?2",
         params![u.id, id],
     ).map_err(s)?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn eliminar_rendicion(st: State<AppState>, id: i64) -> R<()> {
+    auth_tesorero_o_admin(&st)?;
+    let db = st.db.lock().map_err(s)?;
+    db.execute("DELETE FROM rendiciones WHERE id=?1", params![id]).map_err(s)?;
     Ok(())
 }
 
@@ -627,7 +667,7 @@ pub struct UsuarioFila {
 
 #[tauri::command]
 pub fn listar_usuarios(st: State<AppState>) -> R<Vec<UsuarioFila>> {
-    auth(&st)?;
+    auth_superadmin(&st)?;
     let db = st.db.lock().map_err(s)?;
     let mut q = db.prepare("SELECT id, nombre, dni, email, rol, activo FROM usuarios ORDER BY id").map_err(s)?;
     let rows = q.query_map([], |r| {
@@ -652,7 +692,7 @@ pub struct DatosUsuario {
 
 #[tauri::command]
 pub fn crear_usuario(st: State<AppState>, datos: DatosUsuario) -> R<i64> {
-    auth(&st)?;
+    auth_superadmin(&st)?;
     let db = st.db.lock().map_err(s)?;
     let clave = datos.clave.unwrap_or_else(|| "admin123".to_string());
     let hash_str = db::hash(&clave);
@@ -665,7 +705,7 @@ pub fn crear_usuario(st: State<AppState>, datos: DatosUsuario) -> R<i64> {
 
 #[tauri::command]
 pub fn actualizar_usuario(st: State<AppState>, id: i64, datos: DatosUsuario) -> R<()> {
-    auth(&st)?;
+    auth_superadmin(&st)?;
     let db = st.db.lock().map_err(s)?;
     if let Some(ref c) = datos.clave {
         if !c.trim().is_empty() {
@@ -682,7 +722,7 @@ pub fn actualizar_usuario(st: State<AppState>, id: i64, datos: DatosUsuario) -> 
 
 #[tauri::command]
 pub fn cambiar_estado_usuario(st: State<AppState>, id: i64, activo: bool) -> R<()> {
-    auth(&st)?;
+    auth_superadmin(&st)?;
     let db = st.db.lock().map_err(s)?;
     db.execute("UPDATE usuarios SET activo=?1 WHERE id=?2", params![activo as i64, id]).map_err(s)?;
     Ok(())
@@ -696,9 +736,7 @@ pub struct CopiaSeguridadFila {
     pub tamano_bytes: u64,
 }
 
-#[tauri::command]
-pub fn crear_copia_seguridad(st: State<AppState>) -> R<String> {
-    auth(&st)?;
+pub fn ejecutar_copia_interna(st: &AppState) -> R<String> {
     let db = st.db.lock().map_err(s)?;
     let copias_dir = st.data_dir.join("copias");
     std::fs::create_dir_all(&copias_dir).map_err(s)?;
@@ -718,8 +756,14 @@ pub fn crear_copia_seguridad(st: State<AppState>) -> R<String> {
 }
 
 #[tauri::command]
+pub fn crear_copia_seguridad(st: State<AppState>) -> R<String> {
+    auth_superadmin(&st)?;
+    ejecutar_copia_interna(&st)
+}
+
+#[tauri::command]
 pub fn listar_copias_seguridad(st: State<AppState>) -> R<Vec<CopiaSeguridadFila>> {
-    auth(&st)?;
+    auth_superadmin(&st)?;
     let copias_dir = st.data_dir.join("copias");
     let mut copias = Vec::new();
     if let Ok(entries) = std::fs::read_dir(copias_dir) {
@@ -756,14 +800,327 @@ pub fn obtener_configuracion(st: State<AppState>, clave: String) -> R<Option<Str
 
 #[tauri::command]
 pub fn guardar_configuracion(st: State<AppState>, clave: String, valor: String) -> R<()> {
-    auth(&st)?;
+    auth_superadmin(&st)?;
     let db = st.db.lock().map_err(s)?;
     db.execute("INSERT INTO configuracion(clave, valor) VALUES(?1, ?2) ON CONFLICT(clave) DO UPDATE SET valor=?2", params![clave, valor]).map_err(s)?;
     Ok(())
 }
 
 #[tauri::command]
-pub fn obtener_ruta_datos(st: State<AppState>) -> R<String> {
-    auth(&st)?;
+pub fn obtener_ruta_datos(st: State<AppState>, ) -> R<String> {
+    auth_superadmin(&st)?;
     Ok(st.data_dir.to_string_lossy().to_string())
+}
+
+// ----------------------------------------------------
+// COMISIÓN DIRECTIVA Y DOCUMENTACIÓN DE ASAMBLEAS
+// ----------------------------------------------------
+
+#[derive(Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct MiembroComisionFila {
+    pub id: i64,
+    pub orden: i64,
+    pub cargo: String,
+    pub asociado_id: Option<i64>,
+    pub nombre: String,
+    pub dni: String,
+    pub cuil: String,
+    pub domicilio: String,
+    pub localidad: String,
+    pub telefono: String,
+    pub email: String,
+    pub vencimiento: String,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DocumentoAsambleaFila {
+    pub id: i64,
+    pub tipo: String,
+    pub titulo: String,
+    pub periodo: String,
+    pub fecha_generacion: String,
+    pub generado_por: String,
+    pub archivo_pdf: String,
+    pub datos_json: String,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GuardarDocumentoParams {
+    pub tipo: String,
+    pub titulo: String,
+    pub periodo: String,
+    pub datos_json: String,
+    pub pdf_bytes_base64: String,
+}
+
+#[tauri::command]
+pub fn listar_comision_directiva(st: State<AppState>) -> R<Vec<MiembroComisionFila>> {
+    auth(&st)?;
+    let db = st.db.lock().map_err(s)?;
+    let mut stmt = db.prepare(
+        "SELECT id, orden, cargo, asociado_id, nombre, dni, cuil, domicilio, localidad, telefono, email, vencimiento 
+         FROM comision_directiva ORDER BY orden ASC"
+    ).map_err(s)?;
+    let rows = stmt.query_map([], |r| {
+        Ok(MiembroComisionFila {
+            id: r.get(0)?,
+            orden: r.get(1)?,
+            cargo: r.get(2)?,
+            asociado_id: r.get(3)?,
+            nombre: r.get(4)?,
+            dni: r.get(5)?,
+            cuil: r.get(6)?,
+            domicilio: r.get(7)?,
+            localidad: r.get(8)?,
+            telefono: r.get(9)?,
+            email: r.get(10)?,
+            vencimiento: r.get(11)?,
+        })
+    }).map_err(s)?;
+
+    let mut res = Vec::new();
+    for r in rows {
+        res.push(r.map_err(s)?);
+    }
+    Ok(res)
+}
+
+#[tauri::command]
+pub fn guardar_miembro_comision(st: State<AppState>, miembro: MiembroComisionFila) -> R<()> {
+    auth(&st)?;
+    let db = st.db.lock().map_err(s)?;
+    if miembro.id == 0 {
+        db.execute(
+            "INSERT INTO comision_directiva(orden, cargo, asociado_id, nombre, dni, cuil, domicilio, localidad, telefono, email, vencimiento)
+             VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+            params![
+                miembro.orden, miembro.cargo, miembro.asociado_id, miembro.nombre, miembro.dni, miembro.cuil,
+                miembro.domicilio, miembro.localidad, miembro.telefono, miembro.email, miembro.vencimiento
+            ],
+        ).map_err(s)?;
+    } else {
+        db.execute(
+            "UPDATE comision_directiva SET orden=?1, cargo=?2, asociado_id=?3, nombre=?4, dni=?5, cuil=?6, domicilio=?7, localidad=?8, telefono=?9, email=?10, vencimiento=?11
+             WHERE id=?12",
+            params![
+                miembro.orden, miembro.cargo, miembro.asociado_id, miembro.nombre, miembro.dni, miembro.cuil,
+                miembro.domicilio, miembro.localidad, miembro.telefono, miembro.email, miembro.vencimiento,
+                miembro.id
+            ],
+        ).map_err(s)?;
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub fn listar_documentos_asambleas(st: State<AppState>) -> R<Vec<DocumentoAsambleaFila>> {
+    auth(&st)?;
+    let db = st.db.lock().map_err(s)?;
+    let mut stmt = db.prepare(
+        "SELECT id, tipo, titulo, periodo, fecha_generacion, generado_por, archivo_pdf, datos_json 
+         FROM documentos_asambleas ORDER BY id DESC"
+    ).map_err(s)?;
+    let rows = stmt.query_map([], |r| {
+        Ok(DocumentoAsambleaFila {
+            id: r.get(0)?,
+            tipo: r.get(1)?,
+            titulo: r.get(2)?,
+            periodo: r.get(3)?,
+            fecha_generacion: r.get(4)?,
+            generado_por: r.get(5)?,
+            archivo_pdf: r.get(6)?,
+            datos_json: r.get(7)?,
+        })
+    }).map_err(s)?;
+
+    let mut res = Vec::new();
+    for r in rows {
+        res.push(r.map_err(s)?);
+    }
+    Ok(res)
+}
+
+fn decode_base64(s: &str) -> Result<Vec<u8>, String> {
+    const TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut decode_map = [255u8; 256];
+    for (i, &b) in TABLE.iter().enumerate() {
+        decode_map[b as usize] = i as u8;
+    }
+
+    let clean = s.trim().replace(['\r', '\n', ' '], "");
+    let mut buf = Vec::new();
+    let mut accum: u32 = 0;
+    let mut bits = 0;
+
+    for &b in clean.as_bytes() {
+        if b == b'=' {
+            break;
+        }
+        let val = decode_map[b as usize];
+        if val == 255 {
+            continue;
+        }
+        accum = (accum << 6) | (val as u32);
+        bits += 6;
+        if bits >= 8 {
+            bits -= 8;
+            buf.push((accum >> bits) as u8);
+        }
+    }
+    Ok(buf)
+}
+
+fn encode_base64(bytes: &[u8]) -> String {
+    const TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut res = String::new();
+    let mut i = 0;
+    while i < bytes.len() {
+        let b0 = bytes[i];
+        let b1 = if i + 1 < bytes.len() { bytes[i + 1] } else { 0 };
+        let b2 = if i + 2 < bytes.len() { bytes[i + 2] } else { 0 };
+
+        let triple = ((b0 as u32) << 16) | ((b1 as u32) << 8) | (b2 as u32);
+
+        res.push(TABLE[((triple >> 18) & 0x3F) as usize] as char);
+        res.push(TABLE[((triple >> 12) & 0x3F) as usize] as char);
+
+        if i + 1 < bytes.len() {
+            res.push(TABLE[((triple >> 6) & 0x3F) as usize] as char);
+        } else {
+            res.push('=');
+        }
+
+        if i + 2 < bytes.len() {
+            res.push(TABLE[(triple & 0x3F) as usize] as char);
+        } else {
+            res.push('=');
+        }
+
+        i += 3;
+    }
+    res
+}
+
+fn get_desktop_dir() -> std::path::PathBuf {
+    if let Ok(userprofile) = std::env::var("USERPROFILE") {
+        let p = std::path::PathBuf::from(userprofile).join("Desktop");
+        if p.exists() {
+            return p;
+        }
+    }
+    if let Ok(home) = std::env::var("HOME") {
+        let p = std::path::PathBuf::from(home).join("Desktop");
+        if p.exists() {
+            return p;
+        }
+    }
+    std::path::PathBuf::from(".")
+}
+
+#[tauri::command]
+pub fn guardar_documento_asamblea(st: State<AppState>, params: GuardarDocumentoParams) -> R<DocumentoAsambleaFila> {
+    let u = auth(&st)?;
+    let docs_dir = st.data_dir.join("documentos");
+    std::fs::create_dir_all(&docs_dir).map_err(s)?;
+
+    let db = st.db.lock().map_err(s)?;
+    let timestamp: String = db.query_row("SELECT strftime('%Y%m%d_%H%M%S','now','localtime')", [], |r| r.get(0)).map_err(s)?;
+    let fecha_hoy: String = db.query_row("SELECT strftime('%Y-%m-%d %H:%M','now','localtime')", [], |r| r.get(0)).map_err(s)?;
+
+    let filename = format!("{}_{}.pdf", params.tipo.to_lowercase(), timestamp);
+    let full_path = docs_dir.join(&filename);
+
+    let bytes = decode_base64(&params.pdf_bytes_base64)?;
+    std::fs::write(&full_path, &bytes).map_err(s)?;
+
+    db.execute(
+        "INSERT INTO documentos_asambleas(tipo, titulo, periodo, fecha_generacion, generado_por, archivo_pdf, datos_json)
+         VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+        params![
+            params.tipo,
+            params.titulo,
+            params.periodo,
+            fecha_hoy,
+            u.nombre,
+            filename,
+            params.datos_json
+        ],
+    ).map_err(s)?;
+
+    let id = db.last_insert_rowid();
+
+    Ok(DocumentoAsambleaFila {
+        id,
+        tipo: params.tipo,
+        titulo: params.titulo,
+        periodo: params.periodo,
+        fecha_generacion: fecha_hoy,
+        generado_por: u.nombre,
+        archivo_pdf: filename,
+        datos_json: params.datos_json,
+    })
+}
+
+#[tauri::command]
+pub fn eliminar_documento_asamblea(st: State<AppState>, id: i64) -> R<()> {
+    auth_secretaria_o_admin(&st)?;
+    let db = st.db.lock().map_err(s)?;
+    let archivo_pdf: Option<String> = db
+        .query_row("SELECT archivo_pdf FROM documentos_asambleas WHERE id=?1", params![id], |r| r.get(0))
+        .optional()
+        .map_err(s)?;
+
+    if let Some(filename) = archivo_pdf {
+        let pdf_path = st.data_dir.join("documentos").join(&filename);
+        let _ = std::fs::remove_file(pdf_path);
+    }
+
+    db.execute("DELETE FROM documentos_asambleas WHERE id=?1", params![id]).map_err(s)?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn leer_archivo_documento(st: State<AppState>, archivo_pdf: String) -> R<String> {
+    auth(&st)?;
+    let pdf_path = st.data_dir.join("documentos").join(&archivo_pdf);
+    if !pdf_path.exists() {
+        return Err("El archivo PDF no existe en el disco".to_string());
+    }
+    let bytes = std::fs::read(&pdf_path).map_err(s)?;
+    Ok(encode_base64(&bytes))
+}
+
+#[tauri::command]
+pub fn exportar_pdf_escritorio(nombre_archivo: String, pdf_bytes_base64: String) -> R<String> {
+    let bytes = decode_base64(&pdf_bytes_base64)?;
+
+    let desktop_dir = get_desktop_dir();
+    let target_folder = desktop_dir.join("Cooperar Documentos");
+    let _ = std::fs::create_dir_all(&target_folder);
+
+    let clean_name = if nombre_archivo.ends_with(".pdf") {
+        nombre_archivo
+    } else {
+        format!("{}.pdf", nombre_archivo)
+    };
+
+    let target_file = target_folder.join(&clean_name);
+    std::fs::write(&target_file, bytes).map_err(s)?;
+
+    Ok(target_file.to_string_lossy().to_string())
+}
+
+#[tauri::command]
+pub fn guardar_pdf_en_ruta(ruta_destino: String, pdf_bytes_base64: String) -> R<String> {
+    let bytes = decode_base64(&pdf_bytes_base64)?;
+
+    let path = std::path::PathBuf::from(&ruta_destino);
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    std::fs::write(&path, bytes).map_err(s)?;
+    Ok(path.to_string_lossy().to_string())
 }

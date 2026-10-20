@@ -8,7 +8,7 @@ import Button from "../components/ui/Button";
 import s from "./Dashboard.module.css";
 
 export default function Dashboard() {
-  const { navigate } = useApp();
+  const { usuario, navigate } = useApp();
   const [r, setR] = useState<ResumenInicio | null>(null);
 
   useEffect(() => { api.resumenInicio().then(setR).catch(console.error); }, []);
@@ -21,7 +21,14 @@ export default function Dashboard() {
   ];
 
   return (
-    <Layout title="Inicio">
+    <Layout
+      title="Inicio"
+      footer={
+        <span>
+          Última copia de seguridad: {r?.ultimaCopia ?? "sin copias"} · Respaldo automático activo (cada 30 min y al cerrar)
+        </span>
+      }
+    >
       <div className={s.stats}>
         {stats?.map(([label, value]) => (
           <Card key={label} compact className={s.stat}>
@@ -43,15 +50,20 @@ export default function Dashboard() {
         </Card>
         <div className={s.actions}>
           <h2 className={s.actionsTitle}>Acciones rápidas</h2>
-          <Button block onClick={() => navigate("cuotas")}>Registrar pago de cuota</Button>
-          <Button block variant="secondary" onClick={() => navigate("caja")}>Nuevo movimiento de caja</Button>
-          <Button block variant="secondary" onClick={() => navigate("asociados")}>Nuevo asociado</Button>
-          <Button block variant="secondary" onClick={() => navigate("usuarios")}>Copia de seguridad</Button>
+          {(usuario.rol === "Tesorero" || usuario.rol === "Superadmin") && (
+            <>
+              <Button block onClick={() => navigate("cuotas")}>Registrar pago de cuota</Button>
+              <Button block variant="secondary" onClick={() => navigate("caja")}>Nuevo movimiento de caja</Button>
+            </>
+          )}
+          {(usuario.rol === "Secretaria" || usuario.rol === "Superadmin") && (
+            <Button block variant="secondary" onClick={() => navigate("asociados")}>Nuevo asociado</Button>
+          )}
+          {usuario.rol === "Superadmin" && (
+            <Button block variant="secondary" onClick={() => navigate("usuarios")}>Copia de seguridad</Button>
+          )}
         </div>
       </div>
-      <p className={s.note}>
-        Última copia de seguridad: {r?.ultimaCopia ?? "sin copias"} · Se recomienda una copia semanal
-      </p>
     </Layout>
   );
 }

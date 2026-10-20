@@ -7,10 +7,11 @@ interface Props {
   title: string;
   action?: ReactNode;
   headerExtra?: ReactNode;
+  footer?: ReactNode;
   children?: ReactNode;
 }
 
-export default function Layout({ title, action, headerExtra, children }: Props) {
+export default function Layout({ title, action, headerExtra, footer, children }: Props) {
   return (
     <div className={s.shell}>
       <Sidebar />
@@ -20,6 +21,7 @@ export default function Layout({ title, action, headerExtra, children }: Props) 
           {action || headerExtra}
         </header>
         <main className={s.content}>{children}</main>
+        {footer && <footer className={s.footer}>{footer}</footer>}
       </div>
     </div>
   );

@@ -138,6 +138,59 @@ export interface DatosRendicion {
   hasta: string;
 }
 
+// Comisión Directiva y Documentación de Asambleas
+export interface MiembroComisionFila {
+  id: number;
+  orden: number;
+  cargo: string;
+  asociadoId?: number | null;
+  nombre: string;
+  dni: string;
+  cuil: string;
+  domicilio: string;
+  localidad: string;
+  telefono: string;
+  email: string;
+  vencimiento: string;
+}
+
+export interface DocumentoAsambleaFila {
+  id: number;
+  tipo: "NOMINA_COMISION" | "PIA_COOPERADORA" | string;
+  titulo: string;
+  periodo: string;
+  fechaGeneracion: string;
+  generadoPor: string;
+  archivoPdf: string;
+  datosJson: string;
+}
+
+export interface GuardarDocumentoParams {
+  tipo: string;
+  titulo: string;
+  periodo: string;
+  datosJson: string;
+  pdfBytesBase64: string;
+}
+
+export interface DatosInstitucionales {
+  distrito: string;
+  numeroEscuela: string;
+  nombreEscuela: string;
+  asociacionNombre: string;
+  cue: string;
+  cuit: string;
+  domicilioEscuela: string;
+  barrio: string;
+  localidad: string;
+  telefonoEscuela: string;
+  emailInstitucional: string;
+  bancoNombre: string;
+  bancoSucursal: string;
+  cuentaCorriente: string;
+  cbu: string;
+}
+
 // Usuarios
 export interface UsuarioFila {
   id: number;
@@ -537,6 +590,10 @@ export const api = {
       r.aprobadaEn = new Date().toLocaleString("es-AR");
     }
   },
+  eliminarRendicion: async (id: number): Promise<void> => {
+    if (isTauri) return invoke<void>("eliminar_rendicion", { id });
+    mockRendiciones = mockRendiciones.filter((x) => x.id !== id);
+  },
 
   // Usuarios
   listarUsuarios: async (): Promise<UsuarioFila[]> => {
@@ -600,7 +657,162 @@ export const api = {
     if (isTauri) return invoke<string>("obtener_ruta_datos");
     return "./datos";
   },
+
+  // Documentación Asambleas y Comisión Directiva
+  listarComisionDirectiva: async (): Promise<MiembroComisionFila[]> => {
+    if (isTauri) return invoke<MiembroComisionFila[]>("listar_comision_directiva");
+    return [
+      { id: 1, orden: 1, cargo: "PRESIDENTE", nombre: "Carlos Gómez", dni: "20000002", cuil: "20-20000002-3", domicilio: "Av. San Martín 1420", localidad: "Morón", telefono: "11-4567-1111", email: "carlos.gomez@email.com", vencimiento: "31/12/2027" },
+      { id: 2, orden: 2, cargo: "VICEPRESIDENTE", nombre: "Valeria Fernández", dni: "29888777", cuil: "27-29888777-4", domicilio: "Belgrano 450", localidad: "Morón", telefono: "11-9876-2222", email: "valeria.fernandez@email.com", vencimiento: "31/12/2027" },
+      { id: 3, orden: 3, cargo: "SECRETARIO", nombre: "Mariana López", dni: "30000003", cuil: "27-30000003-8", domicilio: "Mitre 830", localidad: "Morón", telefono: "11-6677-3333", email: "mariana.lopez@email.com", vencimiento: "31/12/2027" },
+      { id: 4, orden: 4, cargo: "TESORERO", nombre: "Roberto Fernández", dni: "40000004", cuil: "20-40000004-1", domicilio: "Sarmiento 112", localidad: "Morón", telefono: "11-3344-4444", email: "roberto.fernandez@email.com", vencimiento: "31/12/2027" },
+      { id: 5, orden: 5, cargo: "VOCAL TITULAR 1°", nombre: "Marcos Álvarez", dni: "32111222", cuil: "20-32111222-6", domicilio: "Rivadavia 310", localidad: "Morón", telefono: "11-4567-5555", email: "marcos.alvarez@email.com", vencimiento: "31/12/2027" },
+      { id: 6, orden: 6, cargo: "VOCAL TITULAR 2°", nombre: "Elena Sánchez", dni: "27999111", cuil: "27-27999111-5", domicilio: "Caseros 650", localidad: "Morón", telefono: "11-8899-6666", email: "elena.sanchez@email.com", vencimiento: "31/12/2027" },
+      { id: 7, orden: 7, cargo: "VOCAL TITULAR 3°", nombre: "Pablo Romero", dni: "30111444", cuil: "20-30111444-2", domicilio: "Alsina 920", localidad: "Morón", telefono: "11-7788-7777", email: "pablo.romero@email.com", vencimiento: "31/12/2027" },
+      { id: 8, orden: 8, cargo: "VOCAL SUPLENTE 1°", nombre: "Diego Martínez", dni: "28777666", cuil: "20-28777666-9", domicilio: "Brown 710", localidad: "Morón", telefono: "11-3344-8888", email: "diego.martinez@email.com", vencimiento: "31/12/2027" },
+      { id: 9, orden: 9, cargo: "VOCAL SUPLENTE 2°", nombre: "Laura Rodríguez", dni: "33444555", cuil: "27-33444555-0", domicilio: "Salta 184", localidad: "Morón", telefono: "11-5566-9999", email: "laura.rodriguez@email.com", vencimiento: "31/12/2027" },
+      { id: 10, orden: 10, cargo: "VOCAL SUPLENTE 3°", nombre: "Santiago Gómez", dni: "34555666", cuil: "20-34555666-3", domicilio: "Jujuy 530", localidad: "Morón", telefono: "11-2233-0000", email: "santiago.gomez@email.com", vencimiento: "31/12/2027" },
+      { id: 11, orden: 11, cargo: "REV. CTAS. TITULAR 1°", nombre: "Patricia Benítez", dni: "24111333", cuil: "27-24111333-2", domicilio: "Colón 230", localidad: "Morón", telefono: "11-4455-1234", email: "patricia.benitez@email.com", vencimiento: "31/12/2027" },
+      { id: 12, orden: 12, cargo: "REV. CTAS. TITULAR 2°", nombre: "Gonzalo Morales", dni: "26555444", cuil: "20-26555444-7", domicilio: "25 de Mayo 415", localidad: "Morón", telefono: "11-5566-2345", email: "gonzalo.morales@email.com", vencimiento: "31/12/2027" },
+      { id: 13, orden: 13, cargo: "REV. CTAS. TITULAR DOC.", nombre: "Claudia Navarro", dni: "23888999", cuil: "27-23888999-6", domicilio: "Sucre 890", localidad: "Morón", telefono: "11-6677-3456", email: "claudia.navarro@email.com", vencimiento: "31/12/2027" },
+      { id: 14, orden: 14, cargo: "REV. CTAS. SUPLENTE 1°", nombre: "Federico Castro", dni: "31777888", cuil: "20-31777888-4", domicilio: "Maza 1040", localidad: "Morón", telefono: "11-7788-4567", email: "federico.castro@email.com", vencimiento: "31/12/2027" },
+      { id: 15, orden: 15, cargo: "REV. CTAS. SUPLENTE DOC.", nombre: "Silvia Peralta", dni: "22444111", cuil: "27-22444111-9", domicilio: "Chacabuco 312", localidad: "Morón", telefono: "11-8899-5678", email: "silvia.peralta@email.com", vencimiento: "31/12/2027" },
+      { id: 16, orden: 16, cargo: "ASESOR", nombre: "Director/a Escolar", dni: "18000000", cuil: "27-18000000-5", domicilio: "Directorio 500", localidad: "Morón", telefono: "11-4629-0000", email: "escuela12@educacion.gob.ar", vencimiento: "31/12/2027" },
+    ];
+  },
+
+  guardarMiembroComision: async (miembro: MiembroComisionFila): Promise<void> => {
+    if (isTauri) return invoke<void>("guardar_miembro_comision", { miembro });
+  },
+
+  listarDocumentosAsambleas: async (): Promise<DocumentoAsambleaFila[]> => {
+    if (isTauri) return invoke<DocumentoAsambleaFila[]>("listar_documentos_asambleas");
+    return [
+      {
+        id: 1,
+        tipo: "NOMINA_COMISION",
+        titulo: "Nómina Comisión Directiva Ejercicio 2026",
+        periodo: "2026",
+        fechaGeneracion: "2026-10-01 10:30",
+        generadoPor: "Carlos Gómez",
+        archivoPdf: "nomina_comision_2026.pdf",
+        datosJson: JSON.stringify({
+          ejercicio: "2026",
+          distrito: "Morón",
+          escuela: "E.P. N° 12",
+          asociacion: "Asoc. Cooperadora Escuela Primaria N° 12",
+          totalCargos: 16,
+        }),
+      },
+      {
+        id: 2,
+        tipo: "PIA_COOPERADORA",
+        titulo: "Planilla de Información Anual (P.I.A.) 2025/2026",
+        periodo: "2026",
+        fechaGeneracion: "2026-10-10 14:15",
+        generadoPor: "Roberto Fernández",
+        archivoPdf: "pia_cooperadoras_2026.pdf",
+        datosJson: JSON.stringify({
+          ejercicio: "2026",
+          distrito: "Morón",
+          escuela: "E.P. N° 12",
+          cue: "060123400",
+          saldoInicial: 150000,
+          cuotas: 480000,
+          subsidios: 250000,
+        }),
+      },
+    ];
+  },
+
+  guardarDocumentoAsamblea: async (params: GuardarDocumentoParams): Promise<DocumentoAsambleaFila> => {
+    if (isTauri) return invoke<DocumentoAsambleaFila>("guardar_documento_asamblea", { params });
+    return {
+      id: Date.now(),
+      tipo: params.tipo,
+      titulo: params.titulo,
+      periodo: params.periodo,
+      fechaGeneracion: new Date().toLocaleString("es-AR"),
+      generadoPor: "Usuario",
+      archivoPdf: `${params.tipo.toLowerCase()}_${Date.now()}.pdf`,
+      datosJson: params.datosJson,
+    };
+  },
+
+  eliminarDocumentoAsamblea: async (id: number): Promise<void> => {
+    if (isTauri) return invoke<void>("eliminar_documento_asamblea", { id });
+  },
+
+  leerArchivoDocumento: async (archivoPdf: string): Promise<string> => {
+    if (isTauri) return invoke<string>("leer_archivo_documento", { archivoPdf });
+    return "";
+  },
+
+  exportarPdfEscritorio: async (nombreArchivo: string, pdfBytesBase64: string): Promise<string> => {
+    if (isTauri) return invoke<string>("exportar_pdf_escritorio", { nombreArchivo, pdfBytesBase64 });
+    return "C:/Users/Usuario/Desktop/Cooperar Documentos/" + nombreArchivo;
+  },
+
+  guardarPdfEnRuta: async (rutaDestino: string, pdfBytesBase64: string): Promise<string> => {
+    if (isTauri) return invoke<string>("guardar_pdf_en_ruta", { rutaDestino, pdfBytesBase64 });
+    return rutaDestino;
+  },
+
+  obtenerDatosInstitucionales: async (): Promise<DatosInstitucionales> => {
+    const keys = [
+      "distrito", "numero_escuela", "nombre_escuela", "asociacion_nombre",
+      "cue", "cuit", "domicilio_escuela", "barrio", "localidad",
+      "telefono_escuela", "email_institucional", "banco_nombre",
+      "banco_sucursal", "cuenta_corriente", "cbu"
+    ];
+    const res: Record<string, string> = {};
+    for (const k of keys) {
+      const v = await api.obtenerConfiguracion(k);
+      res[k] = v || "";
+    }
+    return {
+      distrito: res.distrito || "Morón",
+      numeroEscuela: res.numero_escuela || "E.P. N° 12",
+      nombreEscuela: res.nombre_escuela || "General José de San Martín",
+      asociacionNombre: res.asociacion_nombre || "Asoc. Cooperadora Escuela Primaria N° 12",
+      cue: res.cue || "060123400",
+      cuit: res.cuit || "30-67891234-9",
+      domicilioEscuela: res.domicilio_escuela || "Nuestra Señora del Buen Viaje 450",
+      barrio: res.barrio || "Centro",
+      localidad: res.localidad || "Morón",
+      telefonoEscuela: res.telefono_escuela || "011-4629-1234",
+      emailInstitucional: res.email_institucional || "cooperadora.ep12.moron@gmail.com",
+      bancoNombre: res.banco_nombre || "Banco de la Provincia de Buenos Aires",
+      bancoSucursal: res.banco_sucursal || "Sucursal 5012 - Morón",
+      cuentaCorriente: res.cuenta_corriente || "5012-12345/6",
+      cbu: res.cbu || "0140012301501201234567",
+    };
+  },
+
+  guardarDatosInstitucionales: async (datos: DatosInstitucionales): Promise<void> => {
+    const mapping: Record<string, string> = {
+      distrito: datos.distrito,
+      numero_escuela: datos.numeroEscuela,
+      nombre_escuela: datos.nombreEscuela,
+      asociacion_nombre: datos.asociacionNombre,
+      cue: datos.cue,
+      cuit: datos.cuit,
+      domicilio_escuela: datos.domicilioEscuela,
+      barrio: datos.barrio,
+      localidad: datos.localidad,
+      telefono_escuela: datos.telefonoEscuela,
+      email_institucional: datos.emailInstitucional,
+      banco_nombre: datos.bancoNombre,
+      banco_sucursal: datos.bancoSucursal,
+      cuenta_corriente: datos.cuentaCorriente,
+      cbu: datos.cbu,
+    };
+    for (const [k, v] of Object.entries(mapping)) {
+      await api.guardarConfiguracion(k, v);
+    }
+  },
 };
+
 
 export const money = (n: number) => `$ ${n.toLocaleString("es-AR")}`;
 export const signedMoney = (tipo: string, n: number) => `${tipo === "Ingreso" ? "+" : "-"} ${money(n)}`;

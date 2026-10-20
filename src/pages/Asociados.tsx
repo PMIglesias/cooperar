@@ -15,6 +15,8 @@ import Card from "../components/ui/Card";
 import Badge, { Tone } from "../components/ui/Badge";
 import DataTable, { Column } from "../components/ui/DataTable";
 import { Field, SelectField } from "../components/ui/Field";
+import ConfirmDialog from "../components/ui/ConfirmDialog";
+import { useApp } from "../context";
 import s from "./Asociados.module.css";
 
 const TONE: Record<EstadoCuotas, Tone> = {
@@ -29,6 +31,8 @@ interface FormAlumno {
 }
 
 export default function Asociados() {
+  const { usuario } = useApp();
+  const puedeAdministrar = usuario.rol === "Secretaria" || usuario.rol === "Superadmin";
   const [vista, setVista] = useState<"lista" | "ficha" | "formulario">("lista");
 
   // Filtros de listado
@@ -168,6 +172,8 @@ export default function Asociados() {
     }
   };
 
+  const [confirmBajaOpen, setConfirmBajaOpen] = useState(false);
+
   const toggleExento = async () => {
     if (!ficha) return;
     const nuevoEstado = ficha.exento === 0;
@@ -182,18 +188,26 @@ export default function Asociados() {
 
   const toggleBaja = async () => {
     if (!ficha) return;
-    try {
-      if (ficha.activo === 1) {
-        if (confirm(`¿Dar de baja al asociado ${ficha.apellidoNombre}?`)) {
-          await api.darDeBaja(ficha.id);
-          abrirFicha(ficha.id);
-          cargarAsociados();
-        }
-      } else {
+    if (ficha.activo === 1) {
+      setConfirmBajaOpen(true);
+    } else {
+      try {
         await api.reactivarAsociado(ficha.id);
         abrirFicha(ficha.id);
         cargarAsociados();
+      } catch (err) {
+        console.error(err);
       }
+    }
+  };
+
+  const confirmarDarDeBaja = async () => {
+    if (!ficha) return;
+    try {
+      await api.darDeBaja(ficha.id);
+      setConfirmBajaOpen(false);
+      abrirFicha(ficha.id);
+      cargarAsociados();
     } catch (err) {
       console.error(err);
     }
@@ -252,7 +266,7 @@ export default function Asociados() {
     return (
       <Layout
         title="Asociados"
-        action={<Button onClick={abrirNuevoForm}>+ Nuevo asociado</Button>}
+        action={puedeAdministrar ? <Button onClick={abrirNuevoForm}>+ Nuevo asociado</Button> : undefined}
       >
         <div className={s.filters}>
           <Field
@@ -370,17 +384,35 @@ export default function Asociados() {
               />
             </Card>
 
-            <div className={s.actionRow}>
-              <Button onClick={() => abrirEditarForm(ficha)}>
-                Editar datos
-              </Button>
-              <Button variant="secondary" onClick={toggleExento}>
-                {ficha.exento === 1 ? "Quitar condición de exento" : "Marcar como exento"}
-              </Button>
-              <Button variant="secondary" onClick={toggleBaja}>
-                {ficha.activo === 1 ? "Dar de baja asociado" : "Reactivar asociado"}
-              </Button>
-            </div>
+            {puedeAdministrar && (
+              <div className={s.actionRow}>
+                <Button onClick={() => abrirEditarForm(ficha)}>
+                  Editar datos
+                </Button>
+                <Button variant="secondary" onClick={toggleExento}>
+                  {ficha.exento === 1 ? "Quitar condición de exento" : "Marcar como exento"}
+                </Button>
+                <Button variant="secondary" onClick={toggleBaja}>
+                  {ficha.activo === 1 ? "Dar de baja asociado" : "Reactivar asociado"}
+                </Button>
+              </div>
+            )}
+
+            <ConfirmDialog
+              isOpen={confirmBajaOpen}
+              title="Dar de baja asociado"
+              message={
+                <>
+                  ¿Está seguro de que desea dar de baja al asociado{" "}
+                  <strong>{ficha.apellidoNombre}</strong> (DNI {ficha.dni})?
+                </>
+              }
+              confirmLabel="Dar de baja"
+              cancelLabel="Cancelar"
+              variant="danger"
+              onConfirm={confirmarDarDeBaja}
+              onCancel={() => setConfirmBajaOpen(false)}
+            />
           </div>
         ) : (
           <p className={s.emptyText}>Asociado no encontrado.</p>

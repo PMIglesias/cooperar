@@ -7,6 +7,8 @@ import Card from "../components/ui/Card";
 import Badge from "../components/ui/Badge";
 import DataTable, { Column } from "../components/ui/DataTable";
 import { Field, SelectField } from "../components/ui/Field";
+import ConfirmDialog from "../components/ui/ConfirmDialog";
+import { useApp } from "../context";
 import s from "./Caja.module.css";
 
 const TIPOS_FILTRO = ["Todos", "Ingreso", "Egreso"];
@@ -42,6 +44,8 @@ const CATEGORIAS_EGRESO = [
 ];
 
 export default function Caja() {
+  const { usuario } = useApp();
+  const puedeOperarCaja = usuario.rol === "Tesorero" || usuario.rol === "Superadmin";
   const [vista, setVista] = useState<"lista" | "nuevo">("lista");
 
   const [movimientos, setMovimientos] = useState<MovimientoCajaFila[]>([]);
@@ -59,6 +63,9 @@ export default function Caja() {
   const [comprobante, setComprobante] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Confirmación Anulación
+  const [movimientoParaAnular, setMovimientoParaAnular] = useState<MovimientoCajaFila | null>(null);
 
   const cargarDatos = () => {
     setLoading(true);
@@ -119,14 +126,14 @@ export default function Caja() {
     }
   };
 
-  const anularMovimiento = async (m: MovimientoCajaFila) => {
-    if (confirm(`¿Anular el movimiento "${m.descripcion}" por ${money(m.monto)}?`)) {
-      try {
-        await api.anularMovimientoCaja(m.id);
-        cargarDatos();
-      } catch (err) {
-        console.error(err);
-      }
+  const confirmarAnularMovimiento = async () => {
+    if (!movimientoParaAnular) return;
+    try {
+      await api.anularMovimientoCaja(movimientoParaAnular.id);
+      setMovimientoParaAnular(null);
+      cargarDatos();
+    } catch (err) {
+      console.error(err);
     }
   };
 
@@ -182,13 +189,13 @@ export default function Caja() {
       header: "",
       width: 100,
       render: (m) =>
-        m.anulado === 0 ? (
+        puedeOperarCaja && m.anulado === 0 ? (
           <button
             type="button"
             className={s.anularBtn}
             onClick={(e) => {
               e.stopPropagation();
-              anularMovimiento(m);
+              setMovimientoParaAnular(m);
             }}
           >
             Anular
@@ -209,14 +216,16 @@ export default function Caja() {
       <Layout
         title="Caja"
         action={
-          <div style={{ display: "flex", gap: "var(--space-4)" }}>
-            <Button variant="secondary" onClick={() => abrirNuevoMovimiento("Ingreso")}>
-              + Nuevo ingreso
-            </Button>
-            <Button onClick={() => abrirNuevoMovimiento("Egreso")}>
-              - Nuevo egreso
-            </Button>
-          </div>
+          puedeOperarCaja ? (
+            <div style={{ display: "flex", gap: "var(--space-4)" }}>
+              <Button variant="secondary" onClick={() => abrirNuevoMovimiento("Ingreso")}>
+                + Nuevo ingreso
+              </Button>
+              <Button onClick={() => abrirNuevoMovimiento("Egreso")}>
+                - Nuevo egreso
+              </Button>
+            </div>
+          ) : undefined
         }
       >
         <div className={s.stats}>
@@ -268,6 +277,25 @@ export default function Caja() {
           rows={movimientos}
           rowKey={(m) => m.id}
           emptyMessage={loading ? "Cargando movimientos de caja..." : "No se encontraron movimientos registrados."}
+        />
+
+        <ConfirmDialog
+          isOpen={movimientoParaAnular !== null}
+          title="Anular movimiento de caja"
+          message={
+            movimientoParaAnular ? (
+              <>
+                ¿Está seguro de que desea anular el movimiento{" "}
+                <strong>"{movimientoParaAnular.descripcion}"</strong> por un monto de{" "}
+                <strong>{money(movimientoParaAnular.monto)}</strong>?
+              </>
+            ) : null
+          }
+          confirmLabel="Anular movimiento"
+          cancelLabel="Cancelar"
+          variant="danger"
+          onConfirm={confirmarAnularMovimiento}
+          onCancel={() => setMovimientoParaAnular(null)}
         />
       </Layout>
     );

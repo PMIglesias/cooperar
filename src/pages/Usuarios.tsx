@@ -329,13 +329,18 @@ export default function Usuarios() {
         {/* --- TAB 2: RESPALDO --- */}
         {activeTab === "respaldo" && (
           <div>
-            <Card title="Almacenamiento local portable" className={s.backupInfo}>
+            <Card title="Almacenamiento local portable y respaldos automáticos" className={s.backupInfo}>
               <p style={{ color: "var(--color-text-muted)", fontSize: "var(--fs-base)" }}>
                 La base de datos SQLite y los respaldos se guardan de forma portable en la carpeta de la aplicación:
               </p>
               <div>
                 <span className={s.pathTag}>{rutaDatos || "./datos"}</span>
               </div>
+              <p style={{ color: "var(--color-text-muted)", fontSize: "var(--fs-sm)", margin: 0 }}>
+                • <strong>Respaldo automático periódico:</strong> el sistema genera una copia de seguridad automáticamente cada 30 minutos mientras la aplicación está en uso.
+                <br />
+                • <strong>Respaldo automático al salir:</strong> al cerrar la aplicación, se guarda una copia de seguridad de manera instantánea.
+              </p>
             </Card>
 
             {backupMsg && <div className={s.successMsg}>{backupMsg}</div>}

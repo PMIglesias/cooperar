@@ -49,7 +49,25 @@ fn main() {
                 sesion: Mutex::new(None),
                 data_dir: dir,
             });
+
+            // Respaldo automático periódico cada 30 minutos (1800 segundos)
+            let app_handle = app.handle().clone();
+            std::thread::spawn(move || loop {
+                std::thread::sleep(std::time::Duration::from_secs(30 * 60));
+                if let Some(state) = app_handle.try_state::<AppState>() {
+                    let _ = commands::ejecutar_copia_interna(&state);
+                }
+            });
+
             Ok(())
+        })
+        .on_window_event(|window, event| {
+            // Respaldo automático al cerrar la ventana principal / aplicación
+            if let tauri::WindowEvent::CloseRequested { .. } = event {
+                if let Some(state) = window.try_state::<AppState>() {
+                    let _ = commands::ejecutar_copia_interna(&state);
+                }
+            }
         })
         .invoke_handler(tauri::generate_handler![
             commands::login,
@@ -76,6 +94,7 @@ fn main() {
             commands::listar_rendiciones,
             commands::crear_rendicion,
             commands::aprobar_rendicion,
+            commands::eliminar_rendicion,
             commands::listar_usuarios,
             commands::crear_usuario,
             commands::actualizar_usuario,
@@ -85,6 +104,14 @@ fn main() {
             commands::obtener_configuracion,
             commands::guardar_configuracion,
             commands::obtener_ruta_datos,
+            commands::listar_comision_directiva,
+            commands::guardar_miembro_comision,
+            commands::listar_documentos_asambleas,
+            commands::guardar_documento_asamblea,
+            commands::eliminar_documento_asamblea,
+            commands::leer_archivo_documento,
+            commands::exportar_pdf_escritorio,
+            commands::guardar_pdf_en_ruta,
         ])
         .run(tauri::generate_context!())
         .expect("error al iniciar Cooperar");

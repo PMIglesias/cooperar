@@ -7,11 +7,14 @@ import Card from "../components/ui/Card";
 import Badge from "../components/ui/Badge";
 import DataTable, { Column } from "../components/ui/DataTable";
 import { Field, SelectField } from "../components/ui/Field";
+import { useApp } from "../context";
 import s from "./Reuniones.module.css";
 
 const TIPOS_REUNION = ["Comisión", "Asamblea"];
 
 export default function Reuniones() {
+  const { usuario } = useApp();
+  const puedeAdministrar = usuario.rol === "Secretaria" || usuario.rol === "Superadmin";
   const [vista, setVista] = useState<"lista" | "nuevo" | "acta">("lista");
 
   const [reuniones, setReuniones] = useState<ReunionFila[]>([]);
@@ -175,7 +178,7 @@ Presidente                  Secretario/a`;
             abrirActa(r);
           }}
         >
-          {r.acta ? "Ver acta ›" : "Redactar acta ›"}
+          {puedeAdministrar ? (r.acta ? "Ver / Editar acta ›" : "Redactar acta ›") : "Ver acta ›"}
         </button>
       ),
     },
@@ -188,7 +191,7 @@ Presidente                  Secretario/a`;
     return (
       <Layout
         title="Reuniones y actas"
-        action={<Button onClick={abrirProgramar}>+ Programar reunión</Button>}
+        action={puedeAdministrar ? <Button onClick={abrirProgramar}>+ Programar reunión</Button> : undefined}
       >
         <div className={s.filters}>
           <Field
@@ -314,23 +317,32 @@ Presidente                  Secretario/a`;
                 </span>
                 <span className={s.actaSub}>Orden del día: {reunionActa.temas}</span>
               </div>
-              <button type="button" className={s.templateBtn} onClick={cargarPlantillaActa}>
-                📄 Cargar plantilla estándar
-              </button>
+              {puedeAdministrar && (
+                <button type="button" className={s.templateBtn} onClick={cargarPlantillaActa}>
+                  📄 Cargar plantilla estándar
+                </button>
+              )}
             </div>
 
             <textarea
               className={s.actaTextarea}
               value={textoActa}
+              readOnly={!puedeAdministrar}
               onChange={(e) => setTextoActa(e.target.value)}
-              placeholder="Escribí aquí el texto oficial del acta, miembros presentes, temas tratados y resoluciones aprobadas…"
+              placeholder={
+                puedeAdministrar
+                  ? "Escribí aquí el texto oficial del acta, miembros presentes, temas tratados y resoluciones aprobadas…"
+                  : "Acta aún no redactada."
+              }
             />
           </Card>
 
           <div className={s.actionRow}>
-            <Button onClick={guardarActa} disabled={savingActa}>
-              {savingActa ? "Guardando..." : "Guardar acta oficial"}
-            </Button>
+            {puedeAdministrar && (
+              <Button onClick={guardarActa} disabled={savingActa}>
+                {savingActa ? "Guardando..." : "Guardar acta oficial"}
+              </Button>
+            )}
             <Button
               variant="secondary"
               onClick={() => setVista("lista")}

@@ -39,6 +39,32 @@ CREATE TABLE IF NOT EXISTS rendiciones(
   aprobada_por INTEGER REFERENCES usuarios(id), aprobada_en TEXT, pdf TEXT);
 CREATE TABLE IF NOT EXISTS configuracion(clave TEXT PRIMARY KEY, valor TEXT NOT NULL);
 
+CREATE TABLE IF NOT EXISTS comision_directiva(
+  id INTEGER PRIMARY KEY,
+  orden INTEGER NOT NULL,
+  cargo TEXT NOT NULL,
+  asociado_id INTEGER REFERENCES asociados(id) ON DELETE SET NULL,
+  nombre TEXT NOT NULL,
+  dni TEXT NOT NULL,
+  cuil TEXT NOT NULL,
+  domicilio TEXT NOT NULL,
+  localidad TEXT NOT NULL,
+  telefono TEXT NOT NULL,
+  email TEXT NOT NULL,
+  vencimiento TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS documentos_asambleas(
+  id INTEGER PRIMARY KEY,
+  tipo TEXT NOT NULL,
+  titulo TEXT NOT NULL,
+  periodo TEXT NOT NULL,
+  fecha_generacion TEXT NOT NULL,
+  generado_por TEXT NOT NULL,
+  archivo_pdf TEXT NOT NULL,
+  datos_json TEXT NOT NULL
+);
+
 DROP VIEW IF EXISTS v_asociados;
 CREATE VIEW v_asociados AS
 SELECT *,
@@ -144,10 +170,78 @@ pub fn init(dir: &Path) -> Result<Connection, Box<dyn std::error::Error>> {
             [],
         )?;
     }
-    conn.execute("INSERT OR IGNORE INTO configuracion VALUES('monto_cuota','8000')", [])?;
+
+    // Migración por si la tabla comision_directiva ya existía sin asociado_id
+    let _ = conn.execute("ALTER TABLE comision_directiva ADD COLUMN asociado_id INTEGER REFERENCES asociados(id) ON DELETE SET NULL", []);
+
+    // 7. Dummy data para Comisión Directiva si está vacía
+    let n_comision: i64 = conn.query_row("SELECT COUNT(*) FROM comision_directiva", [], |r| r.get(0)).unwrap_or(0);
+    if n_comision == 0 {
+        conn.execute(
+            "INSERT INTO comision_directiva(orden, cargo, asociado_id, nombre, dni, cuil, domicilio, localidad, telefono, email, vencimiento) VALUES
+             (1, 'PRESIDENTE', NULL, 'Carlos Gómez', '20000002', '20-20000002-3', 'Av. San Martín 1420', 'Morón', '11-4567-1111', 'carlos.gomez@email.com', '31/12/2027'),
+             (2, 'VICEPRESIDENTE', 2, 'Fernández, Valeria', '29888777', '27-29888777-4', 'Belgrano 450', 'Morón', '11-9876-5432', 'valeria.fernandez@email.com', '31/12/2027'),
+             (3, 'SECRETARIO', 4, 'López, Mariana', '31222333', '27-31222333-8', 'Mitre 830', 'Morón', '11-6677-8899', 'mariana.lopez@email.com', '31/12/2027'),
+             (4, 'TESORERO', NULL, 'Roberto Fernández', '40000004', '20-40000004-1', 'Sarmiento 112', 'Morón', '11-3344-4444', 'roberto.fernandez@email.com', '31/12/2027'),
+             (5, 'VOCAL TITULAR 1°', 1, 'Álvarez, Marcos', '32111222', '20-32111222-6', 'Rivadavia 310', 'Morón', '11-4567-8901', 'marcos.alvarez@email.com', '31/12/2027'),
+             (6, 'VOCAL TITULAR 2°', 8, 'Sánchez, Elena', '27999111', '27-27999111-5', 'Caseros 650', 'Morón', '11-8899-0011', 'elena.sanchez@email.com', '31/12/2027'),
+             (7, 'VOCAL TITULAR 3°', 7, 'Romero, Pablo', '30111444', '20-30111444-2', 'Alsina 920', 'Morón', '11-7788-9900', 'pablo.romero@email.com', '31/12/2027'),
+             (8, 'VOCAL SUPLENTE 1°', 5, 'Martínez, Diego', '28777666', '20-28777666-9', 'Brown 710', 'Morón', '11-3344-5566', 'diego.martinez@email.com', '31/12/2027'),
+             (9, 'VOCAL SUPLENTE 2°', 6, 'Rodríguez, Laura', '33444555', '27-33444555-0', 'Salta 184', 'Morón', '11-5566-7788', 'laura.rodriguez@email.com', '31/12/2027'),
+             (10, 'VOCAL SUPLENTE 3°', 3, 'Gómez, Santiago', '34555666', '20-34555666-3', 'Jujuy 530', 'Morón', '11-2233-4455', 'santiago.gomez@email.com', '31/12/2027'),
+             (11, 'REV. CTAS. TITULAR 1°', NULL, 'Patricia Benítez', '24111333', '27-24111333-2', 'Colón 230', 'Morón', '11-4455-1234', 'patricia.benitez@email.com', '31/12/2027'),
+             (12, 'REV. CTAS. TITULAR 2°', NULL, 'Gonzalo Morales', '26555444', '20-26555444-7', '25 de Mayo 415', 'Morón', '11-5566-2345', 'gonzalo.morales@email.com', '31/12/2027'),
+             (13, 'REV. CTAS. TITULAR DOC.', NULL, 'Claudia Navarro', '23888999', '27-23888999-6', 'Sucre 890', 'Morón', '11-6677-3456', 'claudia.navarro@email.com', '31/12/2027'),
+             (14, 'REV. CTAS. SUPLENTE 1°', NULL, 'Federico Castro', '31777888', '20-31777888-4', 'Maza 1040', 'Morón', '11-7788-4567', 'federico.castro@email.com', '31/12/2027'),
+             (15, 'REV. CTAS. SUPLENTE DOC.', NULL, 'Silvia Peralta', '22444111', '27-22444111-9', 'Chacabuco 312', 'Morón', '11-8899-5678', 'silvia.peralta@email.com', '31/12/2027'),
+             (16, 'ASESOR', NULL, 'Director/a Escolar', '18000000', '27-18000000-5', 'Directorio 500', 'Morón', '11-4629-0000', 'escuela12@educacion.gob.ar', '31/12/2027')",
+            [],
+        )?;
+    }
+
+    // 8. Dummy data institucional para planillas y documentos
+    let configuraciones_base = [
+        ("monto_cuota", "8000"),
+        ("distrito", "Morón"),
+        ("numero_escuela", "E.P. N° 12"),
+        ("nombre_escuela", "General José de San Martín"),
+        ("asociacion_nombre", "Asoc. Cooperadora Escuela Primaria N° 12"),
+        ("cue", "060123400"),
+        ("cuit", "30-67891234-9"),
+        ("domicilio_escuela", "Nuestra Señora del Buen Viaje 450"),
+        ("barrio", "Centro"),
+        ("localidad", "Morón"),
+        ("telefono_escuela", "011-4629-1234"),
+        ("email_institucional", "cooperadora.ep12.moron@gmail.com"),
+        ("banco_nombre", "Banco de la Provincia de Buenos Aires"),
+        ("banco_sucursal", "Sucursal 5012 - Morón"),
+        ("cuenta_corriente", "5012-12345/6"),
+        ("cbu", "0140012301501201234567"),
+    ];
+
+    for (k, v) in configuraciones_base {
+        conn.execute("INSERT OR IGNORE INTO configuracion(clave, valor) VALUES(?1, ?2)", [k, v])?;
+    }
+
     conn.execute(
         "INSERT OR IGNORE INTO configuracion VALUES('ultima_copia', datetime('now','localtime'))",
         [],
     )?;
+
+    // 9. Dummy data en documentos_asambleas: PIA 2024 y 2025 con sus respectivas NCD
+    let n_docs: i64 = conn.query_row("SELECT COUNT(*) FROM documentos_asambleas", [], |r| r.get(0)).unwrap_or(0);
+    if n_docs <= 2 {
+        // Limpiamos los 2 temporales previos si los hubiera para insertar el set completo de 4 documentos congruentes
+        conn.execute("DELETE FROM documentos_asambleas", [])?;
+        conn.execute(
+            "INSERT INTO documentos_asambleas(id, tipo, titulo, periodo, fecha_generacion, generado_por, archivo_pdf, datos_json) VALUES
+             (1, 'NOMINA_COMISION', 'Nómina Comisión Directiva Ejercicio 2024', '2024', '2024-05-15 18:30', 'Carlos Gómez', 'nomina_comision_2024.pdf', '{\"ejercicio\":\"2024\",\"periodo\":\"2024\",\"totalCargos\":16,\"distrito\":\"Morón\",\"escuela\":\"E.P. N° 12\",\"asociacion\":\"Asoc. Cooperadora Escuela Primaria N° 12\"}'),
+             (2, 'PIA_COOPERADORA', 'Planilla de Información Anual (P.I.A.) 2023/2024', '2024', '2024-05-20 19:15', 'Roberto Fernández', 'pia_cooperadoras_2024.pdf', '{\"ejercicio\":\"2023/2024\",\"periodo\":\"2024\",\"saldoInicialCaja\":120000,\"saldoInicialBanco\":180000,\"totalCuotas\":380000,\"totalDonaciones\":25000,\"totalRifas\":45000,\"totalFestivales\":130000,\"totalKiosco\":60000,\"intereses\":4500,\"reintegrados\":1500,\"subsidios\":200000,\"otrosIngresosA\":15000,\"otrosIngresosB\":10000,\"ropaCalzado\":35000,\"librosUtiles\":60000,\"excursiones\":40000,\"emergencias\":12000,\"golosinasPremios\":18000,\"materialDidactico\":45000,\"mantSubsidios\":120000,\"mantFondosPropios\":65000,\"limpieza\":32000,\"combustible\":20000,\"libreria\":15000,\"mobiliario\":50000,\"organizacionRifas\":10000,\"organizacionFestivales\":25000,\"gastosKiosco\":30000,\"otrosGastosA\":8000,\"otrosGastosB\":5000,\"cuotaSocialAprobada\":5000,\"cajaChicaAprobada\":30000}'),
+             (3, 'NOMINA_COMISION', 'Nómina Comisión Directiva Ejercicio 2025', '2025', '2025-05-14 18:45', 'Carlos Gómez', 'nomina_comision_2025.pdf', '{\"ejercicio\":\"2025\",\"periodo\":\"2025\",\"totalCargos\":16,\"distrito\":\"Morón\",\"escuela\":\"E.P. N° 12\",\"asociacion\":\"Asoc. Cooperadora Escuela Primaria N° 12\"}'),
+             (4, 'PIA_COOPERADORA', 'Planilla de Información Anual (P.I.A.) 2024/2025', '2025', '2025-05-18 19:00', 'Roberto Fernández', 'pia_cooperadoras_2025.pdf', '{\"ejercicio\":\"2024/2025\",\"periodo\":\"2025\",\"saldoInicialCaja\":150000,\"saldoInicialBanco\":230000,\"totalCuotas\":480000,\"totalDonaciones\":35000,\"totalRifas\":60000,\"totalFestivales\":185000,\"totalKiosco\":80000,\"intereses\":6000,\"reintegrados\":2000,\"subsidios\":250000,\"otrosIngresosA\":20000,\"otrosIngresosB\":15000,\"ropaCalzado\":45000,\"librosUtiles\":80000,\"excursiones\":55000,\"emergencias\":15000,\"golosinasPremios\":22000,\"materialDidactico\":60000,\"mantSubsidios\":150000,\"mantFondosPropios\":85000,\"limpieza\":42000,\"combustible\":25000,\"libreria\":20000,\"mobiliario\":70000,\"organizacionRifas\":15000,\"organizacionFestivales\":35000,\"gastosKiosco\":40000,\"otrosGastosA\":10000,\"otrosGastosB\":7000,\"cuotaSocialAprobada\":8000,\"cajaChicaAprobada\":40000}')",
+            [],
+        )?;
+    }
+
     Ok(conn)
 }

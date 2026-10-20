@@ -9,6 +9,8 @@ import Cuotas from "./pages/Cuotas";
 import Caja from "./pages/Caja";
 import Reuniones from "./pages/Reuniones";
 import Rendiciones from "./pages/Rendiciones";
+import Documentacion from "./pages/Documentacion";
+import ComisionDirectiva from "./pages/ComisionDirectiva";
 import Usuarios from "./pages/Usuarios";
 
 export default function App() {
@@ -28,7 +30,9 @@ export default function App() {
   else if (route === "caja") page = <Caja />;
   else if (route === "reuniones") page = <Reuniones />;
   else if (route === "rendiciones") page = <Rendiciones />;
-  else if (route === "usuarios") page = <Usuarios />;
+  else if (route === "documentacion") page = <Documentacion />;
+  else if (route === "comision") page = <ComisionDirectiva />;
+  else if (route === "usuarios" && usuario.rol === "Superadmin") page = <Usuarios />;
   else page = <Dashboard />;
 
   return (

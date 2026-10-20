@@ -14,9 +14,11 @@
   display: flex; align-items: center; gap: var(--space-3); width: 100%;
   padding: var(--space-4) 14px; border: 0; border-radius: var(--radius);
   background: transparent; color: #fff; cursor: pointer; text-align: left;
-  font-size: var(--fs-lg); font-weight: 400; line-height: normal; white-space: nowrap;
+  font-size: var(--fs-lg); font-weight: 400; line-height: 1.25;
   transition: background-color 0.15s ease;
 }
+.itemIcon { flex-shrink: 0; display: flex; align-items: center; }
+.itemLabel { display: flex; flex-direction: column; }
 .active { background: var(--color-nav-active); font-weight: 600; }
 .spacer { flex: 1 1 0; min-height: 1px; }
 .user { display: flex; flex-direction: column; gap: var(--space-1); line-height: normal; white-space: nowrap; }
