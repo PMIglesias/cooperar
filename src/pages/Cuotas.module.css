@@ -62,6 +62,125 @@
   border-radius: var(--radius);
 }
 
+/* Selector buscador de Asociado */
+.asociadoSearchWrapper {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.asociadoSearchLabel {
+  font-size: var(--fs-base);
+  font-weight: 600;
+  line-height: normal;
+  color: var(--color-text-label);
+}
+
+.asociadoInputContainer {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.asociadoInput {
+  width: 100%;
+  height: 48px;
+  padding: 0 40px 0 14px;
+  border: 1.5px solid var(--color-border-field);
+  border-radius: var(--radius);
+  background: var(--color-surface);
+  color: var(--color-text);
+  font-size: var(--fs-base);
+  line-height: normal;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.asociadoInput:focus {
+  outline: none;
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15);
+}
+
+.asociadoClearBtn {
+  position: absolute;
+  right: 12px;
+  background: none;
+  border: none;
+  font-size: var(--fs-md);
+  color: var(--color-text-muted);
+  cursor: pointer;
+  padding: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.asociadoClearBtn:hover {
+  color: var(--color-text);
+}
+
+.asociadoDropdown {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  max-height: 240px;
+  overflow-y: auto;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+  z-index: 100;
+}
+
+.asociadoOption {
+  padding: var(--space-3) var(--space-4);
+  cursor: pointer;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-bottom: 1px solid var(--color-border-row);
+  transition: background-color 0.1s ease;
+}
+
+.asociadoOption:last-child {
+  border-bottom: none;
+}
+
+.asociadoOption:hover,
+.asociadoOptionSelected {
+  background-color: var(--color-th-bg);
+}
+
+.asociadoOptionNombre {
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.asociadoOptionDni {
+  font-size: var(--fs-sm);
+  color: var(--color-text-muted);
+}
+
+.asociadoSeleccionadoCard {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: var(--color-th-bg);
+  border: 1.5px solid var(--color-primary);
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius);
+  margin-top: var(--space-1);
+}
+
+.asociadoSeleccionadoInfo {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+
 /* Pantalla Recibo */
 .receiptPaper {
   background: #ffffff;

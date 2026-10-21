@@ -7,6 +7,8 @@ import Card from "../components/ui/Card";
 import Badge from "../components/ui/Badge";
 import DataTable, { Column } from "../components/ui/DataTable";
 import { Field, SelectField } from "../components/ui/Field";
+import IconButton from "../components/ui/IconButton";
+import { DocumentIcon, EditIcon } from "../components/icons";
 import { useApp } from "../context";
 import s from "./Reuniones.module.css";
 
@@ -153,7 +155,7 @@ Presidente                  Secretario/a`;
     },
     {
       header: "Temas / Orden del día",
-      width: 320,
+      minWidth: 260,
       flex: true,
       render: (r) => <span>{r.temas}</span>,
     },
@@ -167,19 +169,20 @@ Presidente                  Secretario/a`;
       ),
     },
     {
-      header: "",
-      width: 140,
+      header: "Acciones",
+      width: 85,
+      align: "center",
       render: (r) => (
-        <button
-          type="button"
-          className={s.actionBtn}
+        <IconButton
+          icon={r.acta ? <DocumentIcon /> : <EditIcon />}
+          title={puedeAdministrar ? (r.acta ? "Ver / Editar acta" : "Redactar acta") : "Ver acta"}
+          variant="primary"
+          square
           onClick={(e) => {
             e.stopPropagation();
             abrirActa(r);
           }}
-        >
-          {puedeAdministrar ? (r.acta ? "Ver / Editar acta ›" : "Redactar acta ›") : "Ver acta ›"}
-        </button>
+        />
       ),
     },
   ];

@@ -8,6 +8,8 @@ import Badge from "../components/ui/Badge";
 import DataTable, { Column } from "../components/ui/DataTable";
 import { Field, SelectField } from "../components/ui/Field";
 import ConfirmDialog from "../components/ui/ConfirmDialog";
+import IconButton from "../components/ui/IconButton";
+import { DocumentIcon, CheckIcon, TrashIcon } from "../components/icons";
 import { useApp } from "../context";
 import s from "./Rendiciones.module.css";
 
@@ -134,7 +136,8 @@ export default function Rendiciones() {
     },
     {
       header: "Rango de fechas",
-      width: 200,
+      minWidth: 180,
+      flex: true,
       render: (r) => (
         <span>
           {r.desde} al {r.hasta}
@@ -172,43 +175,43 @@ export default function Rendiciones() {
     },
     {
       header: "Acciones",
-      width: 230,
+      width: 130,
       render: (r) => (
-        <div className={s.actionsGroup}>
-          <button
-            type="button"
-            className={s.actionBtn}
+        <div style={{ display: "flex", gap: "6px", alignItems: "center" }}>
+          <IconButton
+            icon={<DocumentIcon />}
+            title="Ver balance de rendición"
+            variant="primary"
+            square
             onClick={(e) => {
               e.stopPropagation();
               setRendicionSeleccionada(r);
               setVista("detalle");
             }}
-          >
-            Ver balance
-          </button>
+          />
           {puedeAprobar && r.estado === "Borrador" && (
-            <button
-              type="button"
-              className={s.approveBtn}
+            <IconButton
+              icon={<CheckIcon />}
+              title="Aprobar rendición formalmente"
+              variant="success"
+              square
               onClick={(e) => {
                 e.stopPropagation();
                 aprobarRendicion(r.id);
               }}
-            >
-              Aprobar
-            </button>
+            />
           )}
           {puedeCrear && (
-            <button
-              type="button"
-              className={s.deleteBtn}
+            <IconButton
+              icon={<TrashIcon />}
+              title="Eliminar rendición"
+              variant="danger"
+              square
               onClick={(e) => {
                 e.stopPropagation();
                 setRendicionParaEliminar({ id: r.id, periodo: r.periodo });
               }}
-            >
-              Eliminar
-            </button>
+            />
           )}
         </div>
       ),

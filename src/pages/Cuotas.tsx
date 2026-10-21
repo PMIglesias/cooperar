@@ -7,6 +7,8 @@ import Card from "../components/ui/Card";
 import Badge from "../components/ui/Badge";
 import DataTable, { Column } from "../components/ui/DataTable";
 import { Field, SelectField } from "../components/ui/Field";
+import IconButton from "../components/ui/IconButton";
+import { ReceiptIcon } from "../components/icons";
 import s from "./Cuotas.module.css";
 
 const PERIODOS_FILTRO = [
@@ -41,6 +43,8 @@ export default function Cuotas() {
 
   // Formulario Registrar Pago
   const [asociadoId, setAsociadoId] = useState<number | "">("");
+  const [busquedaAsociado, setBusquedaAsociado] = useState("");
+  const [mostrarDropdownAsoc, setMostrarDropdownAsoc] = useState(false);
   const [pagoPeriodo, setPagoPeriodo] = useState("2026-10");
   const [pagoMonto, setPagoMonto] = useState("3000");
   const [pagoMedio, setPagoMedio] = useState("Efectivo");
@@ -74,8 +78,10 @@ export default function Cuotas() {
   }, []);
 
   const abrirNuevoPago = () => {
-    setAsociadoId(asociados.length > 0 ? asociados[0].id : "");
-    setPagoPeriodo("2026-10");
+    setAsociadoId("");
+    setBusquedaAsociado("");
+    setMostrarDropdownAsoc(false);
+    setPagoPeriodo(new Date().toISOString().slice(0, 7));
     setPagoMedio("Efectivo");
     setPagoComprobante(`REC-${Math.floor(1000 + Math.random() * 9000)}`);
     setPagoError(null);
@@ -139,38 +145,39 @@ export default function Cuotas() {
     },
     {
       header: "Asociado",
-      width: 220,
+      minWidth: 200,
       flex: true,
       render: (p) => <strong>{p.apellidoNombre}</strong>,
     },
-    { header: "DNI", width: 120, render: (p) => p.dni },
+    { header: "DNI", width: 115, render: (p) => p.dni },
     {
       header: "Período",
-      width: 110,
+      width: 105,
       render: (p) => <Badge tone="ok">{p.periodo}</Badge>,
     },
-    { header: "Medio", width: 130, render: (p) => p.medio },
+    { header: "Medio", width: 125, render: (p) => p.medio },
     {
       header: "Monto",
       width: 120,
       render: (p) => <strong>{money(p.monto)}</strong>,
     },
-    { header: "Registrado por", width: 150, render: (p) => p.registradoPor },
+    { header: "Registrado por", minWidth: 140, flex: true, render: (p) => p.registradoPor },
     {
-      header: "",
-      width: 110,
+      header: "Acciones",
+      width: 85,
+      align: "center",
       render: (p) => (
-        <button
-          className={s.receiptBtn}
-          type="button"
+        <IconButton
+          icon={<ReceiptIcon />}
+          title="Ver recibo oficial"
+          variant="primary"
+          square
           onClick={(e) => {
             e.stopPropagation();
             setReciboSeleccionado(p);
             setVista("recibo");
           }}
-        >
-          Ver recibo ›
-        </button>
+        />
       ),
     },
   ];
@@ -224,13 +231,17 @@ export default function Cuotas() {
   // PANTALLA 2: REGISTRAR PAGO
   // -------------------------------------------------------------
   if (vista === "nuevo") {
-    const opcionesAsociados = [
-      { value: "", label: "Seleccione un asociado…" },
-      ...asociados.map((a) => ({
-        value: String(a.id),
-        label: `${a.apellidoNombre} (DNI ${a.dni})`,
-      })),
-    ];
+    const asociadosFiltrados = asociados.filter((a) => {
+      if (!busquedaAsociado.trim()) return true;
+      const q = busquedaAsociado.toLowerCase().trim();
+      return (
+        a.apellidoNombre.toLowerCase().includes(q) ||
+        a.dni.includes(q) ||
+        (a.alumnos && a.alumnos.toLowerCase().includes(q))
+      );
+    });
+
+    const asociadoSeleccionado = asociados.find((a) => a.id === Number(asociadoId));
 
     return (
       <Layout
@@ -246,14 +257,111 @@ export default function Cuotas() {
 
           <Card title="Datos del pago">
             <div className={s.formFields}>
-              <SelectField
-                label="Asociado titular"
-                value={String(asociadoId)}
-                options={opcionesAsociados}
-                onChange={(v) => setAsociadoId(v ? Number(v) : "")}
-                width="100%"
-                required
-              />
+              {/* Buscador predictivo de Asociado Titular por Nombre, Apellido o DNI */}
+              <div className={s.asociadoSearchWrapper}>
+                <label className={s.asociadoSearchLabel}>
+                  Asociado titular <span style={{ color: "var(--color-danger)" }}>*</span>
+                </label>
+
+                {asociadoSeleccionado ? (
+                  <div className={s.asociadoSeleccionadoCard}>
+                    <div className={s.asociadoSeleccionadoInfo}>
+                      <span style={{ fontWeight: 700, fontSize: "var(--fs-base)" }}>
+                        {asociadoSeleccionado.apellidoNombre}
+                      </span>
+                      <code style={{ fontSize: "var(--fs-sm)" }}>DNI {asociadoSeleccionado.dni}</code>
+                      {asociadoSeleccionado.alumnos && (
+                        <span style={{ fontSize: "var(--fs-xs)", color: "var(--color-text-muted)" }}>
+                          ({asociadoSeleccionado.alumnos})
+                        </span>
+                      )}
+                      <Badge tone={asociadoSeleccionado.estadoCuotas === "Al día" ? "ok" : "warn"}>
+                        {asociadoSeleccionado.estadoCuotas}
+                      </Badge>
+                    </div>
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      onClick={() => {
+                        setAsociadoId("");
+                        setBusquedaAsociado("");
+                        setMostrarDropdownAsoc(true);
+                      }}
+                    >
+                      Cambiar
+                    </Button>
+                  </div>
+                ) : (
+                  <div className={s.asociadoInputContainer}>
+                    <input
+                      type="text"
+                      className={s.asociadoInput}
+                      placeholder="Escribí apellido, nombre o DNI del asociado…"
+                      value={busquedaAsociado}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setBusquedaAsociado(val);
+                        setMostrarDropdownAsoc(val.trim().length > 0);
+                      }}
+                      onFocus={() => {
+                        if (busquedaAsociado.trim().length > 0) {
+                          setMostrarDropdownAsoc(true);
+                        }
+                      }}
+                    />
+                    {busquedaAsociado && (
+                      <button
+                        type="button"
+                        className={s.asociadoClearBtn}
+                        onClick={() => {
+                          setBusquedaAsociado("");
+                          setMostrarDropdownAsoc(false);
+                        }}
+                        title="Limpiar búsqueda"
+                      >
+                        ✕
+                      </button>
+                    )}
+
+                    {mostrarDropdownAsoc && busquedaAsociado.trim().length > 0 && (
+                      <div className={s.asociadoDropdown}>
+                        {asociadosFiltrados.length === 0 ? (
+                          <div style={{ padding: "var(--space-4)", textAlign: "center", color: "var(--color-text-muted)", fontSize: "var(--fs-sm)" }}>
+                            No se encontró ningún asociado activo con "{busquedaAsociado}".
+                          </div>
+                        ) : (
+                          asociadosFiltrados.slice(0, 8).map((a) => (
+                            <div
+                              key={a.id}
+                              className={s.asociadoOption}
+                              onMouseDown={() => {
+                                setAsociadoId(a.id);
+                                setBusquedaAsociado("");
+                                setMostrarDropdownAsoc(false);
+                              }}
+                            >
+                              <div>
+                                <div className={s.asociadoOptionNombre}>{a.apellidoNombre}</div>
+                                {a.alumnos && (
+                                  <div style={{ fontSize: "var(--fs-xs)", color: "var(--color-text-muted)" }}>
+                                    Alumnos: {a.alumnos}
+                                  </div>
+                                )}
+                              </div>
+                              <div style={{ display: "flex", alignItems: "center", gap: "var(--space-2)" }}>
+                                <span className={s.asociadoOptionDni}>DNI {a.dni}</span>
+                                <Badge tone={a.estadoCuotas === "Al día" ? "ok" : "warn"}>
+                                  {a.estadoCuotas}
+                                </Badge>
+                              </div>
+                            </div>
+                          ))
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
 
               <div className={s.formRow}>
                 <Field
@@ -267,8 +375,8 @@ export default function Cuotas() {
                 <Field
                   label="Monto ($)"
                   type="number"
-                  min="1"
-                  step="100"
+                  min="0.01"
+                  step="any"
                   value={pagoMonto}
                   onChange={(e) => setPagoMonto(e.target.value)}
                   width={180}

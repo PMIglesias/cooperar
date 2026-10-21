@@ -16,6 +16,8 @@ import Badge, { Tone } from "../components/ui/Badge";
 import DataTable, { Column } from "../components/ui/DataTable";
 import { Field, SelectField } from "../components/ui/Field";
 import ConfirmDialog from "../components/ui/ConfirmDialog";
+import IconButton from "../components/ui/IconButton";
+import { EyeIcon } from "../components/icons";
 import { useApp } from "../context";
 import s from "./Asociados.module.css";
 
@@ -214,10 +216,10 @@ export default function Asociados() {
   };
 
   const COLUMNS: Column<AsociadoFila>[] = [
-    { header: "Apellido y nombre", width: 220, render: (a) => <strong>{a.apellidoNombre}</strong> },
+    { header: "Apellido y nombre", minWidth: 200, flex: true, render: (a) => <strong>{a.apellidoNombre}</strong> },
     { header: "DNI", width: 120, render: (a) => a.dni },
-    { header: "Teléfono", width: 140, render: (a) => a.telefono || "—" },
-    { header: "Alumnos", width: 240, flex: true, render: (a) => a.alumnos || "—" },
+    { header: "Teléfono", width: 130, render: (a) => a.telefono || "—" },
+    { header: "Alumnos", minWidth: 180, flex: true, render: (a) => a.alumnos || "—" },
     {
       header: "Estado",
       width: 110,
@@ -233,19 +235,20 @@ export default function Asociados() {
       render: (a) => <Badge tone={TONE[a.estadoCuotas]}>{a.estadoCuotas}</Badge>,
     },
     {
-      header: "",
-      width: 100,
+      header: "Acciones",
+      width: 85,
+      align: "center",
       render: (a) => (
-        <button
-          type="button"
-          className={s.viewBtn}
+        <IconButton
+          icon={<EyeIcon />}
+          title="Ver ficha del asociado"
+          variant="primary"
+          square
           onClick={(e) => {
             e.stopPropagation();
             abrirFicha(a.id);
           }}
-        >
-          Ver ficha ›
-        </button>
+        />
       ),
     },
   ];

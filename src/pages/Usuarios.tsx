@@ -11,6 +11,8 @@ import Button from "../components/ui/Button";
 import Card from "../components/ui/Card";
 import Badge from "../components/ui/Badge";
 import DataTable, { Column } from "../components/ui/DataTable";
+import IconButton from "../components/ui/IconButton";
+import { EditIcon, ToggleActiveIcon } from "../components/icons";
 import { Field, SelectField } from "../components/ui/Field";
 import s from "./Usuarios.module.css";
 
@@ -23,7 +25,7 @@ const ROLES: { value: Rol; label: string }[] = [
 
 export default function Usuarios() {
   const [vista, setVista] = useState<"lista" | "formulario">("lista");
-  const [activeTab, setActiveTab] = useState<"usuarios" | "respaldo" | "config">("usuarios");
+  const [activeTab, setActiveTab] = useState<"usuarios" | "respaldo">("usuarios");
 
   // --- TAB USUARIOS ---
   const [usuarios, setUsuarios] = useState<UsuarioFila[]>([]);
@@ -43,13 +45,6 @@ export default function Usuarios() {
   const [creandoBackup, setCreandoBackup] = useState(false);
   const [backupMsg, setBackupMsg] = useState<string | null>(null);
 
-  // --- TAB CONFIGURACIÓN ---
-  const [cuotaMensual, setCuotaMensual] = useState("3000");
-  const [nombreInstitucion, setNombreInstitucion] = useState("Escuela de Educación Primaria N° 12");
-  const [cuit, setCuit] = useState("30-65849201-4");
-  const [configSaving, setConfigSaving] = useState(false);
-  const [configMsg, setConfigMsg] = useState<string | null>(null);
-
   const cargarUsuarios = () => {
     api.listarUsuarios().then(setUsuarios).catch(console.error);
   };
@@ -59,23 +54,9 @@ export default function Usuarios() {
     api.obtenerRutaDatos().then(setRutaDatos).catch(console.error);
   };
 
-  const cargarConfiguracion = async () => {
-    try {
-      const c = await api.obtenerConfiguracion("cuota_mensual");
-      if (c) setCuotaMensual(c);
-      const inst = await api.obtenerConfiguracion("nombre_institucion");
-      if (inst) setNombreInstitucion(inst);
-      const cu = await api.obtenerConfiguracion("cuit");
-      if (cu) setCuit(cu);
-    } catch (err) {
-      console.error(err);
-    }
-  };
-
   useEffect(() => {
     cargarUsuarios();
     cargarCopias();
-    cargarConfiguracion();
   }, []);
 
   // Manejadores Usuarios
@@ -161,23 +142,6 @@ export default function Usuarios() {
     }
   };
 
-  // Manejador Configuración
-  const guardarConfig = async (e: FormEvent) => {
-    e.preventDefault();
-    setConfigSaving(true);
-    setConfigMsg(null);
-    try {
-      await api.guardarConfiguracion("cuota_mensual", cuotaMensual);
-      await api.guardarConfiguracion("nombre_institucion", nombreInstitucion);
-      await api.guardarConfiguracion("cuit", cuit);
-      setConfigMsg("✓ Configuración guardada correctamente.");
-    } catch (err) {
-      setConfigMsg(`Error al guardar: ${String(err)}`);
-    } finally {
-      setConfigSaving(false);
-    }
-  };
-
   const usuariosFiltrados = usuarios.filter((u) => {
     return (
       !busquedaUsuario ||
@@ -190,7 +154,8 @@ export default function Usuarios() {
   const columnsUsuarios: Column<UsuarioFila>[] = [
     {
       header: "Nombre y apellido",
-      width: 220,
+      minWidth: 200,
+      flex: true,
       render: (u) => <strong>{u.nombre}</strong>,
     },
     {
@@ -208,7 +173,7 @@ export default function Usuarios() {
         return <Badge tone={tone}>{u.rol}</Badge>;
       },
     },
-    { header: "Correo electrónico", width: 220, flex: true, render: (u) => u.email || "—" },
+    { header: "Correo electrónico", minWidth: 200, flex: true, render: (u) => u.email || "—" },
     {
       header: "Estado",
       width: 120,
@@ -219,24 +184,29 @@ export default function Usuarios() {
       ),
     },
     {
-      header: "",
-      width: 180,
+      header: "Acciones",
+      width: 95,
+      align: "center",
       render: (u) => (
-        <div style={{ display: "flex", gap: "6px" }}>
-          <button
-            type="button"
-            className={s.actionBtn}
-            onClick={() => abrirEditarUsuario(u)}
-          >
-            Editar
-          </button>
-          <button
-            type="button"
-            className={`${s.toggleBtn} ${u.activo === 1 ? s.toggleBtnActive : s.toggleBtnInactive}`}
-            onClick={() => toggleEstadoUsuario(u)}
-          >
-            {u.activo === 1 ? "Desactivar" : "Reactivar"}
-          </button>
+        <div style={{ display: "flex", gap: "6px", alignItems: "center", justifyContent: "center" }}>
+          <IconButton
+            icon={<EditIcon size={16} />}
+            variant="default"
+            title={`Editar usuario: ${u.nombre}`}
+            onClick={(e) => {
+              e.stopPropagation();
+              abrirEditarUsuario(u);
+            }}
+          />
+          <IconButton
+            icon={<ToggleActiveIcon size={16} active={u.activo === 1} />}
+            variant={u.activo === 1 ? "danger" : "success"}
+            title={u.activo === 1 ? `Desactivar cuenta de ${u.nombre}` : `Reactivar cuenta de ${u.nombre}`}
+            onClick={(e) => {
+              e.stopPropagation();
+              toggleEstadoUsuario(u);
+            }}
+          />
         </div>
       ),
     },
@@ -294,13 +264,6 @@ export default function Usuarios() {
           >
             Copias de seguridad
           </button>
-          <button
-            type="button"
-            className={`${s.tabBtn} ${activeTab === "config" ? s.tabBtnActive : ""}`}
-            onClick={() => setActiveTab("config")}
-          >
-            Parámetros del sistema
-          </button>
         </div>
 
         {/* --- TAB 1: USUARIOS --- */}
@@ -354,50 +317,6 @@ export default function Usuarios() {
               />
             </Card>
           </div>
-        )}
-
-        {/* --- TAB 3: CONFIGURACIÓN --- */}
-        {activeTab === "config" && (
-          <form onSubmit={guardarConfig} className={s.formContainer}>
-            {configMsg && <div className={s.successMsg}>{configMsg}</div>}
-
-            <Card title="Configuración institucional">
-              <div className={s.formFields}>
-                <Field
-                  label="Nombre de la institución escolar"
-                  value={nombreInstitucion}
-                  onChange={(e) => setNombreInstitucion(e.target.value)}
-                  width="100%"
-                  required
-                />
-                <div className={s.formRow}>
-                  <Field
-                    label="CUIT de la cooperadora"
-                    value={cuit}
-                    onChange={(e) => setCuit(e.target.value)}
-                    width={260}
-                    required
-                  />
-                  <Field
-                    label="Valor cuota mensual ($)"
-                    type="number"
-                    min="0"
-                    step="100"
-                    value={cuotaMensual}
-                    onChange={(e) => setCuotaMensual(e.target.value)}
-                    width={200}
-                    required
-                  />
-                </div>
-              </div>
-            </Card>
-
-            <div className={s.actionRow}>
-              <Button type="submit" disabled={configSaving}>
-                {configSaving ? "Guardando..." : "Guardar configuración"}
-              </Button>
-            </div>
-          </form>
         )}
       </Layout>
     );

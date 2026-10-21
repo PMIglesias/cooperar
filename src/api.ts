@@ -154,6 +154,16 @@ export interface MiembroComisionFila {
   vencimiento: string;
 }
 
+export interface PersonalEstablecimientoFila {
+  id: number;
+  cargo: string;
+  nombre: string;
+  dni: string;
+  telefono: string;
+  email: string;
+  vinculoNomina: "NINGUNO" | "ASESOR" | "REV_CTAS_DOC_TIT" | "REV_CTAS_DOC_SUP" | string;
+}
+
 export interface DocumentoAsambleaFila {
   id: number;
   tipo: "NOMINA_COMISION" | "PIA_COOPERADORA" | string;
@@ -189,6 +199,9 @@ export interface DatosInstitucionales {
   bancoSucursal: string;
   cuentaCorriente: string;
   cbu: string;
+  alias: string;
+  cuotaMensual: string;
+  cuotaAnual: string;
 }
 
 // Usuarios
@@ -475,13 +488,22 @@ export const api = {
       asociado.estadoCuotas = "Al día";
     }
 
+    // Formatear período legible: "2026-10" -> "Mes 10/26", "2026" -> "Anual 2026"
+    let periodoFmt = datos.periodo;
+    if (datos.periodo.length === 7 && datos.periodo.includes("-")) {
+      const [yyyy, mm] = datos.periodo.split("-");
+      periodoFmt = `Mes ${mm}/${yyyy.slice(2)}`;
+    } else if (datos.periodo.length === 4) {
+      periodoFmt = `Anual ${datos.periodo}`;
+    }
+
     // Registrar en caja
     mockMovimientos.unshift({
       id: Date.now() + 1,
       fecha: nuevoPago.fechaPago,
       tipo: "Ingreso",
       categoria: "Cuotas",
-      descripcion: `Cobro cuota ${datos.periodo} - ${nombre}`,
+      descripcion: `Asociado N° ${datos.asociadoId} - ${periodoFmt}\n${nombre}`,
       monto: datos.monto,
       comprobante: nuevoPago.comprobante,
       anulado: 0,
@@ -685,6 +707,26 @@ export const api = {
     if (isTauri) return invoke<void>("guardar_miembro_comision", { miembro });
   },
 
+  listarPersonalEstablecimiento: async (): Promise<PersonalEstablecimientoFila[]> => {
+    if (isTauri) return invoke<PersonalEstablecimientoFila[]>("listar_personal_establecimiento");
+    return [
+      { id: 1, cargo: "Director/a", nombre: "Prof. Martín Valenzuela", dni: "18000000", telefono: "11-4629-0000", email: "escuela12@educacion.gob.ar", vinculoNomina: "ASESOR" },
+      { id: 2, cargo: "Vicedirector/a", nombre: "Lic. Andrea Benítez", dni: "21333444", telefono: "11-4629-0001", email: "andrea.benitez@educacion.gob.ar", vinculoNomina: "NINGUNO" },
+      { id: 3, cargo: "Secretario/a Escolar", nombre: "Prof. Esteban Quispe", dni: "23111222", telefono: "11-4629-0002", email: "esteban.quispe@educacion.gob.ar", vinculoNomina: "NINGUNO" },
+      { id: 4, cargo: "Docente de Grado", nombre: "Claudia Navarro", dni: "23888999", telefono: "11-6677-3456", email: "claudia.navarro@email.com", vinculoNomina: "REV_CTAS_DOC_TIT" },
+      { id: 5, cargo: "Docente de Grado", nombre: "Silvia Peralta", dni: "22444111", telefono: "11-8899-5678", email: "silvia.peralta@email.com", vinculoNomina: "REV_CTAS_DOC_SUP" },
+    ];
+  },
+
+  guardarPersonalEstablecimiento: async (p: PersonalEstablecimientoFila): Promise<PersonalEstablecimientoFila> => {
+    if (isTauri) return invoke<PersonalEstablecimientoFila>("guardar_personal_establecimiento", { p });
+    return { ...p, id: p.id || Date.now() };
+  },
+
+  eliminarPersonalEstablecimiento: async (id: number): Promise<void> => {
+    if (isTauri) return invoke<void>("eliminar_personal_establecimiento", { id });
+  },
+
   listarDocumentosAsambleas: async (): Promise<DocumentoAsambleaFila[]> => {
     if (isTauri) return invoke<DocumentoAsambleaFila[]>("listar_documentos_asambleas");
     return [
@@ -763,7 +805,8 @@ export const api = {
       "distrito", "numero_escuela", "nombre_escuela", "asociacion_nombre",
       "cue", "cuit", "domicilio_escuela", "barrio", "localidad",
       "telefono_escuela", "email_institucional", "banco_nombre",
-      "banco_sucursal", "cuenta_corriente", "cbu"
+      "banco_sucursal", "cuenta_corriente", "cbu", "alias",
+      "cuota_mensual", "cuota_anual"
     ];
     const res: Record<string, string> = {};
     for (const k of keys) {
@@ -786,6 +829,9 @@ export const api = {
       bancoSucursal: res.banco_sucursal || "Sucursal 5012 - Morón",
       cuentaCorriente: res.cuenta_corriente || "5012-12345/6",
       cbu: res.cbu || "0140012301501201234567",
+      alias: res.alias || "COOP.EP12.MORON",
+      cuotaMensual: res.cuota_mensual || "8000",
+      cuotaAnual: res.cuota_anual || "80000",
     };
   },
 
@@ -806,6 +852,9 @@ export const api = {
       banco_sucursal: datos.bancoSucursal,
       cuenta_corriente: datos.cuentaCorriente,
       cbu: datos.cbu,
+      alias: datos.alias,
+      cuota_mensual: datos.cuotaMensual,
+      cuota_anual: datos.cuotaAnual,
     };
     for (const [k, v] of Object.entries(mapping)) {
       await api.guardarConfiguracion(k, v);

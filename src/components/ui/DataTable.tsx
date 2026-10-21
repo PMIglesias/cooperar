@@ -6,7 +6,9 @@ export interface Column<T> {
   key?: string;
   header: string;
   width?: number;
+  minWidth?: number;
   flex?: boolean;
+  align?: "left" | "center" | "right";
   render?: (row: T) => ReactNode;
 }
 
@@ -33,7 +35,15 @@ export default function DataTable<T>({
 
   const style = {
     "--cols": columns
-      .map((c) => (c.width ? `${c.width}px` : c.flex ? `minmax(120px, 1fr)` : `minmax(100px, 1fr)`))
+      .map((c) => {
+        if (c.flex) {
+          return `minmax(${c.minWidth || c.width || 120}px, 1fr)`;
+        }
+        if (c.width) {
+          return `${c.width}px`;
+        }
+        return `minmax(${c.minWidth || 100}px, 1fr)`;
+      })
       .join(" "),
     "--pr": `${rightPad}px`,
   } as CSSProperties;
@@ -51,7 +61,12 @@ export default function DataTable<T>({
     <div className={s.table} style={style} role="table">
       <div className={`${s.row} ${s.head}`} role="row">
         {columns.map((c, i) => (
-          <div key={i} className={s.cell} role="columnheader">
+          <div
+            key={i}
+            className={s.cell}
+            role="columnheader"
+            style={c.align ? { textAlign: c.align, justifyContent: c.align === "center" ? "center" : c.align === "right" ? "flex-end" : "flex-start" } : undefined}
+          >
             {c.header || "\u200b"}
           </div>
         ))}
@@ -67,7 +82,12 @@ export default function DataTable<T>({
             onClick={() => onRowClick && onRowClick(r)}
           >
             {columns.map((c, i) => (
-              <div key={i} className={s.cell} role="cell">
+              <div
+                key={i}
+                className={s.cell}
+                role="cell"
+                style={c.align ? { textAlign: c.align, justifyContent: c.align === "center" ? "center" : c.align === "right" ? "flex-end" : "flex-start" } : undefined}
+              >
                 {c.render
                   ? c.render(r)
                   : c.key && typeof r === "object" && r !== null

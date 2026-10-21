@@ -393,7 +393,24 @@ pub fn registrar_pago(st: State<AppState>, datos: DatosPago) -> R<i64> {
     let tx = db.transaction().map_err(s)?;
 
     let asociado_nombre: String = tx.query_row("SELECT apellido_nombre FROM asociados WHERE id=?1", params![datos.asociado_id], |r| r.get(0)).map_err(s)?;
-    let desc = format!("Cobro cuota {} - {}", datos.periodo, asociado_nombre);
+    
+    // Formatear período legible: "2026-10" -> "Mes 10/26", "2026" -> "Anual 2026"
+    let periodo_fmt = if datos.periodo.len() == 7 && datos.periodo.contains('-') {
+        let parts: Vec<&str> = datos.periodo.split('-').collect();
+        if parts.len() == 2 && parts[0].len() == 4 && parts[1].len() == 2 {
+            let yy = &parts[0][2..];
+            let mm = parts[1];
+            format!("Mes {}/{}", mm, yy)
+        } else {
+            datos.periodo.clone()
+        }
+    } else if datos.periodo.len() == 4 {
+        format!("Anual {}", datos.periodo)
+    } else {
+        datos.periodo.clone()
+    };
+
+    let desc = format!("Asociado N° {} - {}\n{}", datos.asociado_id, periodo_fmt, asociado_nombre);
 
     // 1. Crear movimiento en caja automático
     tx.execute(
@@ -912,6 +929,102 @@ pub fn guardar_miembro_comision(st: State<AppState>, miembro: MiembroComisionFil
             ],
         ).map_err(s)?;
     }
+    Ok(())
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct PersonalEstablecimientoFila {
+    pub id: i64,
+    pub cargo: String,
+    pub nombre: String,
+    pub dni: String,
+    pub telefono: String,
+    pub email: String,
+    pub vinculo_nomina: String,
+}
+
+#[tauri::command]
+pub fn listar_personal_establecimiento(st: State<AppState>) -> R<Vec<PersonalEstablecimientoFila>> {
+    auth(&st)?;
+    let db = st.db.lock().map_err(s)?;
+    let mut stmt = db.prepare(
+        "SELECT id, cargo, nombre, dni, telefono, email, vinculo_nomina 
+         FROM personal_establecimiento ORDER BY id ASC"
+    ).map_err(s)?;
+    let rows = stmt.query_map([], |r| {
+        Ok(PersonalEstablecimientoFila {
+            id: r.get(0)?,
+            cargo: r.get(1)?,
+            nombre: r.get(2)?,
+            dni: r.get(3)?,
+            telefono: r.get(4)?,
+            email: r.get(5)?,
+            vinculo_nomina: r.get(6)?,
+        })
+    }).map_err(s)?;
+
+    let mut res = Vec::new();
+    for r in rows {
+        res.push(r.map_err(s)?);
+    }
+    Ok(res)
+}
+
+#[tauri::command]
+pub fn guardar_personal_establecimiento(st: State<AppState>, p: PersonalEstablecimientoFila) -> R<PersonalEstablecimientoFila> {
+    auth_secretaria_o_admin(&st)?;
+    let db = st.db.lock().map_err(s)?;
+    let id = if p.id == 0 {
+        db.execute(
+            "INSERT INTO personal_establecimiento(cargo, nombre, dni, telefono, email, vinculo_nomina)
+             VALUES(?1, ?2, ?3, ?4, ?5, ?6)",
+            params![p.cargo, p.nombre, p.dni, p.telefono, p.email, p.vinculo_nomina],
+        ).map_err(s)?;
+        db.last_insert_rowid()
+    } else {
+        db.execute(
+            "UPDATE personal_establecimiento SET cargo=?1, nombre=?2, dni=?3, telefono=?4, email=?5, vinculo_nomina=?6
+             WHERE id=?7",
+            params![p.cargo, p.nombre, p.dni, p.telefono, p.email, p.vinculo_nomina, p.id],
+        ).map_err(s)?;
+        p.id
+    };
+
+    // Si tiene un vínculo con la nómina de la comisión directiva, actualizar automáticamente el cargo correspondiente
+    if p.vinculo_nomina == "ASESOR" {
+        let _ = db.execute(
+            "UPDATE comision_directiva SET nombre=?1, dni=?2, telefono=?3, email=?4 WHERE orden=16 OR cargo LIKE '%ASESOR%'",
+            params![p.nombre, p.dni, p.telefono, p.email],
+        );
+    } else if p.vinculo_nomina == "REV_CTAS_DOC_TIT" {
+        let _ = db.execute(
+            "UPDATE comision_directiva SET nombre=?1, dni=?2, telefono=?3, email=?4 WHERE orden=13 OR cargo LIKE '%TITULAR DOC%'",
+            params![p.nombre, p.dni, p.telefono, p.email],
+        );
+    } else if p.vinculo_nomina == "REV_CTAS_DOC_SUP" {
+        let _ = db.execute(
+            "UPDATE comision_directiva SET nombre=?1, dni=?2, telefono=?3, email=?4 WHERE orden=15 OR cargo LIKE '%SUPLENTE DOC%'",
+            params![p.nombre, p.dni, p.telefono, p.email],
+        );
+    }
+
+    Ok(PersonalEstablecimientoFila {
+        id,
+        cargo: p.cargo,
+        nombre: p.nombre,
+        dni: p.dni,
+        telefono: p.telefono,
+        email: p.email,
+        vinculo_nomina: p.vinculo_nomina,
+    })
+}
+
+#[tauri::command]
+pub fn eliminar_personal_establecimiento(st: State<AppState>, id: i64) -> R<()> {
+    auth_secretaria_o_admin(&st)?;
+    let db = st.db.lock().map_err(s)?;
+    db.execute("DELETE FROM personal_establecimiento WHERE id=?1", params![id]).map_err(s)?;
     Ok(())
 }
 

@@ -8,6 +8,8 @@ import Badge from "../components/ui/Badge";
 import DataTable, { Column } from "../components/ui/DataTable";
 import { Field, SelectField } from "../components/ui/Field";
 import ConfirmDialog from "../components/ui/ConfirmDialog";
+import IconButton from "../components/ui/IconButton";
+import { BanIcon, EyeIcon } from "../components/icons";
 import { useApp } from "../context";
 import s from "./Caja.module.css";
 
@@ -66,6 +68,9 @@ export default function Caja() {
 
   // Confirmación Anulación
   const [movimientoParaAnular, setMovimientoParaAnular] = useState<MovimientoCajaFila | null>(null);
+
+  // Modal Ver Detalle Movimiento
+  const [movimientoSeleccionado, setMovimientoSeleccionado] = useState<MovimientoCajaFila | null>(null);
 
   const cargarDatos = () => {
     setLoading(true);
@@ -148,27 +153,31 @@ export default function Caja() {
         </Badge>
       ),
     },
-    { header: "Categoría", width: 180, render: (m) => m.categoria },
+    { header: "Categoría", minWidth: 150, flex: true, render: (m) => m.categoria },
     {
       header: "Descripción",
-      width: 260,
+      minWidth: 220,
       flex: true,
-      render: (m) => (
-        <div>
-          <span style={{ textDecoration: m.anulado ? "line-through" : "none", color: m.anulado ? "var(--color-text-hint)" : "inherit" }}>
-            {m.descripcion}
-          </span>
-          {m.anulado === 1 && (
-            <Badge tone="danger" style={{ marginLeft: "8px" }}>
-              Anulado
-            </Badge>
-          )}
-        </div>
-      ),
+      render: (m) => {
+        // En la tabla solo mostramos la primera línea si la descripción es multilínea
+        const primeraLinea = m.descripcion.split("\n")[0];
+        return (
+          <div>
+            <span style={{ textDecoration: m.anulado ? "line-through" : "none", color: m.anulado ? "var(--color-text-hint)" : "inherit" }}>
+              {primeraLinea}
+            </span>
+            {m.anulado === 1 && (
+              <Badge tone="danger" style={{ marginLeft: "8px" }}>
+                Anulado
+              </Badge>
+            )}
+          </div>
+        );
+      },
     },
     {
       header: "Comprobante",
-      width: 140,
+      width: 130,
       render: (m) => m.comprobante ? m.comprobante : <span style={{ color: "var(--color-text-hint)" }}>—</span>,
     },
     {
@@ -186,23 +195,35 @@ export default function Caja() {
       ),
     },
     {
-      header: "",
-      width: 100,
-      render: (m) =>
-        puedeOperarCaja && m.anulado === 0 ? (
-          <button
-            type="button"
-            className={s.anularBtn}
+      header: "Acciones",
+      width: 95,
+      align: "center",
+      render: (m) => (
+        <div style={{ display: "flex", gap: "6px", alignItems: "center", justifyContent: "center" }}>
+          <IconButton
+            icon={<EyeIcon size={16} />}
+            title="Ver detalle del movimiento"
+            variant="default"
+            square
             onClick={(e) => {
               e.stopPropagation();
-              setMovimientoParaAnular(m);
+              setMovimientoSeleccionado(m);
             }}
-          >
-            Anular
-          </button>
-        ) : (
-          <span style={{ color: "var(--color-text-hint)", fontSize: "var(--fs-xs)" }}>—</span>
-        ),
+          />
+          {puedeOperarCaja && m.anulado === 0 && (
+            <IconButton
+              icon={<BanIcon size={16} />}
+              title="Anular movimiento"
+              variant="danger"
+              square
+              onClick={(e) => {
+                e.stopPropagation();
+                setMovimientoParaAnular(m);
+              }}
+            />
+          )}
+        </div>
+      ),
     },
   ];
 
@@ -276,8 +297,128 @@ export default function Caja() {
           columns={columns}
           rows={movimientos}
           rowKey={(m) => m.id}
+          onRowClick={(m) => setMovimientoSeleccionado(m)}
           emptyMessage={loading ? "Cargando movimientos de caja..." : "No se encontraron movimientos registrados."}
         />
+
+        {/* Modal de Detalle de Movimiento de Caja */}
+        {movimientoSeleccionado && (
+          <div className={s.modalOverlay}>
+            <div className={s.modalCard}>
+              <div className={s.modalHeader}>
+                <h3 className={s.modalTitle}>
+                  Detalle del Movimiento #{movimientoSeleccionado.id}
+                </h3>
+                <button
+                  type="button"
+                  className={s.modalClose}
+                  onClick={() => setMovimientoSeleccionado(null)}
+                >
+                  ✕
+                </button>
+              </div>
+
+              <div className={s.modalBody}>
+                <div className={s.detailGrid}>
+                  <div className={s.detailItem}>
+                    <span className={s.detailLabel}>Tipo de Movimiento</span>
+                    <span className={s.detailValue}>
+                      <Badge tone={movimientoSeleccionado.tipo === "Ingreso" ? "ok" : "danger"}>
+                        {movimientoSeleccionado.tipo === "Ingreso" ? "Ingreso de Fondos" : "Egreso / Gasto"}
+                      </Badge>
+                    </span>
+                  </div>
+
+                  <div className={s.detailItem}>
+                    <span className={s.detailLabel}>Estado</span>
+                    <span className={s.detailValue}>
+                      <Badge tone={movimientoSeleccionado.anulado === 1 ? "danger" : "ok"}>
+                        {movimientoSeleccionado.anulado === 1 ? "Anulado" : "Efectivo / Válido"}
+                      </Badge>
+                    </span>
+                  </div>
+
+                  <div className={s.detailItem}>
+                    <span className={s.detailLabel}>Fecha del Movimiento</span>
+                    <span className={s.detailValue}>{movimientoSeleccionado.fecha}</span>
+                  </div>
+
+                  <div className={s.detailItem}>
+                    <span className={s.detailLabel}>Monto Operado</span>
+                    <span
+                      className={s.detailValue}
+                      style={{
+                        fontWeight: 700,
+                        fontSize: "var(--fs-lg)",
+                        color:
+                          movimientoSeleccionado.anulado === 1
+                            ? "var(--color-text-hint)"
+                            : movimientoSeleccionado.tipo === "Ingreso"
+                            ? "var(--color-ok)"
+                            : "var(--color-danger)",
+                        textDecoration: movimientoSeleccionado.anulado === 1 ? "line-through" : "none",
+                      }}
+                    >
+                      {signedMoney(movimientoSeleccionado.tipo, movimientoSeleccionado.monto)}
+                    </span>
+                  </div>
+
+                  <div className={s.detailItem}>
+                    <span className={s.detailLabel}>Categoría</span>
+                    <span className={s.detailValue}>{movimientoSeleccionado.categoria}</span>
+                  </div>
+
+                  <div className={s.detailItem}>
+                    <span className={s.detailLabel}>N° de Comprobante / Factura</span>
+                    <span className={s.detailValue}>
+                      {movimientoSeleccionado.comprobante ? (
+                        <code>{movimientoSeleccionado.comprobante}</code>
+                      ) : (
+                        <span style={{ color: "var(--color-text-hint)" }}>Sin comprobante asociado</span>
+                      )}
+                    </span>
+                  </div>
+                </div>
+
+                <div className={s.detailItem} style={{ marginTop: "var(--space-2)" }}>
+                  <span className={s.detailLabel}>Concepto / Descripción Detallada</span>
+                  <div
+                    style={{
+                      background: "var(--color-th-bg)",
+                      padding: "var(--space-4)",
+                      borderRadius: "var(--radius-sm)",
+                      border: "1px solid var(--color-border)",
+                      fontSize: "var(--fs-base)",
+                      color: "var(--color-text)",
+                      lineHeight: 1.5,
+                      whiteSpace: "pre-line",
+                    }}
+                  >
+                    {movimientoSeleccionado.descripcion}
+                  </div>
+                </div>
+              </div>
+
+              <div className={s.modalFooter}>
+                {puedeOperarCaja && movimientoSeleccionado.anulado === 0 && (
+                  <Button
+                    variant="danger"
+                    onClick={() => {
+                      const m = movimientoSeleccionado;
+                      setMovimientoSeleccionado(null);
+                      setMovimientoParaAnular(m);
+                    }}
+                  >
+                    Anular Movimiento
+                  </Button>
+                )}
+                <Button variant="secondary" onClick={() => setMovimientoSeleccionado(null)}>
+                  Cerrar
+                </Button>
+              </div>
+            </div>
+          </div>
+        )}
 
         <ConfirmDialog
           isOpen={movimientoParaAnular !== null}
@@ -353,8 +494,8 @@ export default function Caja() {
               <Field
                 label="Monto ($)"
                 type="number"
-                min="1"
-                step="100"
+                min="0.01"
+                step="any"
                 placeholder="0"
                 value={monto}
                 onChange={(e) => setMonto(e.target.value)}

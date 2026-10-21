@@ -44,6 +44,8 @@
   text-overflow: ellipsis;
   white-space: nowrap;
   padding-right: var(--space-3);
+  display: flex;
+  align-items: center;
 }
 
 .cell:last-child {

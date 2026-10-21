@@ -39,6 +39,16 @@ CREATE TABLE IF NOT EXISTS rendiciones(
   aprobada_por INTEGER REFERENCES usuarios(id), aprobada_en TEXT, pdf TEXT);
 CREATE TABLE IF NOT EXISTS configuracion(clave TEXT PRIMARY KEY, valor TEXT NOT NULL);
 
+CREATE TABLE IF NOT EXISTS personal_establecimiento(
+  id INTEGER PRIMARY KEY,
+  cargo TEXT NOT NULL,
+  nombre TEXT NOT NULL,
+  dni TEXT NOT NULL,
+  telefono TEXT NOT NULL,
+  email TEXT NOT NULL,
+  vinculo_nomina TEXT DEFAULT 'NINGUNO'
+);
+
 CREATE TABLE IF NOT EXISTS comision_directiva(
   id INTEGER PRIMARY KEY,
   orden INTEGER NOT NULL,
@@ -199,7 +209,19 @@ pub fn init(dir: &Path) -> Result<Connection, Box<dyn std::error::Error>> {
         )?;
     }
 
-    // 8. Dummy data institucional para planillas y documentos
+    // 7.b Dummy data para Personal del Establecimiento si está vacía
+    let n_personal: i64 = conn.query_row("SELECT COUNT(*) FROM personal_establecimiento", [], |r| r.get(0)).unwrap_or(0);
+    if n_personal == 0 {
+        conn.execute(
+            "INSERT INTO personal_establecimiento(cargo, nombre, dni, telefono, email, vinculo_nomina) VALUES
+             ('Director/a', 'Prof. Martín Valenzuela', '18000000', '11-4629-0000', 'escuela12@educacion.gob.ar', 'ASESOR'),
+             ('Vicedirector/a', 'Lic. Andrea Benítez', '21333444', '11-4629-0001', 'andrea.benitez@educacion.gob.ar', 'NINGUNO'),
+             ('Secretario/a Escolar', 'Prof. Esteban Quispe', '23111222', '11-4629-0002', 'esteban.quispe@educacion.gob.ar', 'NINGUNO'),
+             ('Docente de Grado', 'Claudia Navarro', '23888999', '11-6677-3456', 'claudia.navarro@email.com', 'REV_CTAS_DOC_TIT'),
+             ('Docente de Grado', 'Silvia Peralta', '22444111', '11-8899-5678', 'silvia.peralta@email.com', 'REV_CTAS_DOC_SUP')",
+            [],
+        )?;
+    }
     let configuraciones_base = [
         ("monto_cuota", "8000"),
         ("distrito", "Morón"),
@@ -217,6 +239,9 @@ pub fn init(dir: &Path) -> Result<Connection, Box<dyn std::error::Error>> {
         ("banco_sucursal", "Sucursal 5012 - Morón"),
         ("cuenta_corriente", "5012-12345/6"),
         ("cbu", "0140012301501201234567"),
+        ("alias", "COOP.EP12.MORON"),
+        ("cuota_mensual", "8000"),
+        ("cuota_anual", "80000"),
     ];
 
     for (k, v) in configuraciones_base {

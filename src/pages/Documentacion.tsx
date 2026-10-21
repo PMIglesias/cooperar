@@ -2,6 +2,8 @@
 import { useEffect, useState, useRef } from "react";
 import Layout from "../components/Layout";
 import ConfirmDialog from "../components/ui/ConfirmDialog";
+import IconButton from "../components/ui/IconButton";
+import { EyeIcon, TrashIcon } from "../components/icons";
 import {
   api,
   DocumentoAsambleaFila,
@@ -411,24 +413,22 @@ export default function Documentacion() {
                         <td>{doc.periodo}</td>
                         <td>{doc.generadoPor}</td>
                         <td style={{ textAlign: "right" }}>
-                          <div className={s.rowActions} style={{ justifyContent: "flex-end" }}>
-                            <button
-                              type="button"
-                              className={s.actionBtn}
+                          <div style={{ display: "flex", gap: "6px", justifyContent: "flex-end", alignItems: "center" }}>
+                            <IconButton
+                              icon={<EyeIcon />}
                               title="Visualizar e Imprimir PDF"
+                              variant="primary"
+                              square
                               onClick={() => handleVerPdfHistorico(doc)}
-                            >
-                              Ver PDF
-                            </button>
+                            />
                             {puedeEliminar && (
-                              <button
-                                type="button"
-                                className={s.actionBtnDanger}
-                                title="Eliminar registro"
+                              <IconButton
+                                icon={<TrashIcon />}
+                                title="Eliminar documento del historial"
+                                variant="danger"
+                                square
                                 onClick={() => setDocAEliminar(doc)}
-                              >
-                                Eliminar
-                              </button>
+                              />
                             )}
                           </div>
                         </td>

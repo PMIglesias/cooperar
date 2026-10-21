@@ -196,11 +196,12 @@ export async function generarPdfPia(
 
   // Cuadro 3: Asamblea Anual Ordinaria
   const anioFull = anios[1] ? anios[1].trim() : (2000 + parseInt(anioFin)).toString();
+  const anioAA = anioFull.slice(-2);
   trySet("acta", "49");
   trySet("foja", "12");
   trySet("dia", "15");
   trySet("mes", "05");
-  trySet("año", anioFull);
+  trySet("año", anioAA);
   trySet("asistieron", "38");
 
   // Cuadro 4: Decisiones Adoptadas
@@ -214,6 +215,12 @@ export async function generarPdfPia(
   trySet("7", financiero.cajaChicaAprobada);
 
   // Cuadro 5: Nueva Comisión Directiva (14 filas)
+  // En la plantilla:
+  // Fila idx (1..14):
+  //   Prefijo CUIL (2 dígitos): CUIL{idx}
+  //   Cuerpo CUIL (8 dígitos):  CUIL{idx + 14}
+  //   Dígito CUIL (1 dígito):   CUIL{idx + 28}
+  //   Columna VEN./MAN.:        Texto{idx + 3}
   const sorted = [...miembros].sort((a, b) => a.orden - b.orden);
   for (let i = 0; i < 14; i++) {
     const idx = i + 1;
@@ -223,13 +230,15 @@ export async function generarPdfPia(
       trySet(`NOMBRE Y APELLIDO${idx}`, m.nombre);
       const cuilDigits = m.cuil.replace(/\D/g, "");
       if (cuilDigits.length >= 11) {
-        trySet(`CUIL${(idx - 1) * 3 + 1}`, cuilDigits.slice(0, 2));
-        trySet(`CUIL${(idx - 1) * 3 + 2}`, cuilDigits.slice(2, 10));
-        trySet(`CUIL${(idx - 1) * 3 + 3}`, cuilDigits.slice(10, 11));
+        trySet(`CUIL${idx}`, cuilDigits.slice(0, 2));
+        trySet(`CUIL${idx + 14}`, cuilDigits.slice(2, 10));
+        trySet(`CUIL${idx + 28}`, cuilDigits.slice(10, 11));
+      } else if (cuilDigits.length > 0) {
+        trySet(`CUIL${idx + 14}`, cuilDigits);
       } else {
-        trySet(`CUIL${(idx - 1) * 3 + 2}`, m.cuil);
+        trySet(`CUIL${idx + 14}`, m.cuil);
       }
-      trySet(`Texto${idx + 3}`, m.telefono);
+      trySet(`Texto${idx + 3}`, m.vencimiento || m.telefono);
     }
   }
 
@@ -268,10 +277,10 @@ export async function generarPdfPia(
     trySet("DNI6", vice.dni);
   }
 
-  // Fechas al pie de Página 1
+  // Fechas en pie / cuadro de fojas
   trySet("D", "15");
   trySet("M", "05");
-  trySet("A", anioFull);
+  trySet("A", anioAA);
   trySet("NRO FOJA", "15");
 
   // ==========================================
@@ -412,10 +421,10 @@ export async function generarPdfPia(
   tryCheck("Check Box194"); // Posee SI
   tryCheck("Check Box196"); // Propio
 
-  // Fecha al pie Página 2
+  // Fecha al pie Página 2 (Sección Kiosco / Cierre en formato AA)
   trySet("DIA 2", "15");
   trySet("MES 2", "05");
-  trySet("AÑO 2", anioFull);
+  trySet("AÑO 2", anioAA);
 
   return pdfDoc.save();
 }
