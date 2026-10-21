@@ -9,7 +9,7 @@ import DataTable, { Column } from "../components/ui/DataTable";
 import { Field, SelectField } from "../components/ui/Field";
 import ConfirmDialog from "../components/ui/ConfirmDialog";
 import IconButton from "../components/ui/IconButton";
-import { BanIcon, EyeIcon } from "../components/icons";
+import { BanIcon, EyeIcon, PrinterIcon, PaperclipIcon } from "../components/icons";
 import { useApp } from "../context";
 import s from "./Caja.module.css";
 
@@ -29,7 +29,6 @@ const CATEGORIAS_FILTRO = [
 ];
 
 const CATEGORIAS_INGRESO = [
-  "Cuotas",
   "Donaciones",
   "Subsidios",
   "Eventos y Festivales",
@@ -63,6 +62,8 @@ export default function Caja() {
   const [descripcion, setDescripcion] = useState("");
   const [monto, setMonto] = useState("");
   const [comprobante, setComprobante] = useState("");
+  const [archivoAdjunto, setArchivoAdjunto] = useState<string | null>(null);
+  const [archivoBase64, setArchivoBase64] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -71,6 +72,7 @@ export default function Caja() {
 
   // Modal Ver Detalle Movimiento
   const [movimientoSeleccionado, setMovimientoSeleccionado] = useState<MovimientoCajaFila | null>(null);
+  const [visorArchivo, setVisorArchivo] = useState<{ nombre: string; dataUrl: string } | null>(null);
 
   const cargarDatos = () => {
     setLoading(true);
@@ -96,8 +98,28 @@ export default function Caja() {
     setDescripcion("");
     setMonto("");
     setComprobante("");
+    setArchivoAdjunto(null);
+    setArchivoBase64(null);
     setError(null);
     setVista("nuevo");
+  };
+
+  const handleArchivoSeleccionado = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      setArchivoAdjunto(file.name);
+      if (!comprobante.trim()) {
+        const nombreSinExt = file.name.substring(0, file.name.lastIndexOf(".")) || file.name;
+        setComprobante(nombreSinExt);
+      }
+      const reader = new FileReader();
+      reader.onload = () => {
+        if (typeof reader.result === "string") {
+          setArchivoBase64(reader.result);
+        }
+      };
+      reader.readAsDataURL(file);
+    }
   };
 
   const guardarMovimiento = async (e: FormEvent) => {
@@ -115,13 +137,27 @@ export default function Caja() {
     setSaving(true);
     setError(null);
     try {
-      await api.crearMovimientoCaja({
+      const compFinal = comprobante.trim() || (archivoAdjunto ? archivoAdjunto : undefined);
+      const nuevoId = await api.crearMovimientoCaja({
         tipo,
         categoria,
         descripcion: descripcion.trim(),
         monto: montoNum,
-        comprobante: comprobante.trim() || undefined,
+        comprobante: compFinal,
       });
+
+      // Si se adjuntó un archivo en base64, guardarlo en el almacenamiento local indexado por el ID del movimiento
+      if (archivoBase64) {
+        try {
+          localStorage.setItem(`comprobante_mov_${nuevoId}`, JSON.stringify({
+            nombre: archivoAdjunto || "comprobante",
+            dataUrl: archivoBase64,
+          }));
+        } catch (e) {
+          console.warn("No se pudo almacenar comprobante en localStorage:", e);
+        }
+      }
+
       cargarDatos();
       setVista("lista");
     } catch (err) {
@@ -303,15 +339,15 @@ export default function Caja() {
 
         {/* Modal de Detalle de Movimiento de Caja */}
         {movimientoSeleccionado && (
-          <div className={s.modalOverlay}>
-            <div className={s.modalCard}>
+          <div className={s.modalOverlay} onClick={() => setMovimientoSeleccionado(null)}>
+            <div className={`${s.modalCard} ${s.printSection}`} onClick={(e) => e.stopPropagation()}>
               <div className={s.modalHeader}>
                 <h3 className={s.modalTitle}>
                   Detalle del Movimiento #{movimientoSeleccionado.id}
                 </h3>
                 <button
                   type="button"
-                  className={s.modalClose}
+                  className={`${s.modalClose} ${s.noPrint}`}
                   onClick={() => setMovimientoSeleccionado(null)}
                 >
                   ✕
@@ -370,13 +406,34 @@ export default function Caja() {
 
                   <div className={s.detailItem}>
                     <span className={s.detailLabel}>N° de Comprobante / Factura</span>
-                    <span className={s.detailValue}>
+                    <div style={{ display: "flex", alignItems: "center", gap: "var(--space-2)", flexWrap: "wrap" }}>
                       {movimientoSeleccionado.comprobante ? (
                         <code>{movimientoSeleccionado.comprobante}</code>
                       ) : (
                         <span style={{ color: "var(--color-text-hint)" }}>Sin comprobante asociado</span>
                       )}
-                    </span>
+                      {(() => {
+                        const adjuntoStorage = localStorage.getItem(`comprobante_mov_${movimientoSeleccionado.id}`);
+                        if (adjuntoStorage) {
+                          try {
+                            const parsed = JSON.parse(adjuntoStorage);
+                            return (
+                              <button
+                                type="button"
+                                className={s.viewAttachBtn}
+                                onClick={() => setVisorArchivo(parsed)}
+                                title="Ver comprobante adjunto"
+                              >
+                                <PaperclipIcon size={14} />
+                              </button>
+                            );
+                          } catch {
+                            return null;
+                          }
+                        }
+                        return null;
+                      })()}
+                    </div>
                   </div>
                 </div>
 
@@ -399,7 +456,15 @@ export default function Caja() {
                 </div>
               </div>
 
-              <div className={s.modalFooter}>
+              <div className={`${s.modalFooter} ${s.noPrint}`}>
+                <Button
+                  variant="secondary"
+                  onClick={() => window.print()}
+                  style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}
+                >
+                  <PrinterIcon size={16} />
+                  Imprimir Detalle
+                </Button>
                 {puedeOperarCaja && movimientoSeleccionado.anulado === 0 && (
                   <Button
                     variant="danger"
@@ -413,6 +478,67 @@ export default function Caja() {
                   </Button>
                 )}
                 <Button variant="secondary" onClick={() => setMovimientoSeleccionado(null)}>
+                  Cerrar
+                </Button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Modal Visor de Comprobante / Archivo Adjunto */}
+        {visorArchivo && (
+          <div className={s.modalOverlay} onClick={() => setVisorArchivo(null)}>
+            <div
+              className={`${s.modalCard} ${s.printSection}`}
+              style={{ maxWidth: "800px", width: "95vw", height: "85vh" }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className={s.modalHeader}>
+                <h3 className={s.modalTitle} style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                  <PaperclipIcon size={18} />
+                  {visorArchivo.nombre}
+                </h3>
+                <button
+                  type="button"
+                  className={`${s.modalClose} ${s.noPrint}`}
+                  onClick={() => setVisorArchivo(null)}
+                >
+                  ✕
+                </button>
+              </div>
+              <div style={{ flex: 1, padding: "var(--space-4)", overflow: "hidden", display: "flex", justifyContent: "center", alignItems: "center", background: "#f8fafc" }}>
+                {visorArchivo.dataUrl.startsWith("data:application/pdf") ? (
+                  <iframe
+                    id="visor-comprobante-iframe"
+                    src={visorArchivo.dataUrl}
+                    title={visorArchivo.nombre}
+                    style={{ width: "100%", height: "100%", border: "none", borderRadius: "var(--radius-sm)" }}
+                  />
+                ) : (
+                  <img
+                    src={visorArchivo.dataUrl}
+                    alt={visorArchivo.nombre}
+                    style={{ maxWidth: "100%", maxHeight: "100%", objectFit: "contain", borderRadius: "var(--radius-sm)" }}
+                  />
+                )}
+              </div>
+              <div className={`${s.modalFooter} ${s.noPrint}`}>
+                <Button
+                  variant="secondary"
+                  onClick={() => {
+                    const iframe = document.getElementById("visor-comprobante-iframe") as HTMLIFrameElement | null;
+                    if (iframe && iframe.contentWindow) {
+                      iframe.contentWindow.print();
+                    } else {
+                      window.print();
+                    }
+                  }}
+                  style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}
+                >
+                  <PrinterIcon size={16} />
+                  Imprimir Comprobante
+                </Button>
+                <Button variant="primary" onClick={() => setVisorArchivo(null)}>
                   Cerrar
                 </Button>
               </div>
@@ -490,7 +616,7 @@ export default function Caja() {
               required
             />
 
-            <div className={s.formRow}>
+            <div className={s.formRow} style={{ alignItems: "flex-end" }}>
               <Field
                 label="Monto ($)"
                 type="number"
@@ -502,13 +628,28 @@ export default function Caja() {
                 width={200}
                 required
               />
-              <Field
-                label="N° Comprobante / Factura (Opcional)"
-                placeholder="Ej: FAC-B-0001-00042"
-                value={comprobante}
-                onChange={(e) => setComprobante(e.target.value)}
-                width={280}
-              />
+              <div className={s.voucherContainer}>
+                <Field
+                  label="N° Comprobante / Factura (Opcional)"
+                  placeholder="Ej: FAC-B-0001-00042"
+                  value={comprobante}
+                  onChange={(e) => setComprobante(e.target.value)}
+                  width={260}
+                />
+                <div>
+                  <input
+                    type="file"
+                    id="comprobante-file"
+                    style={{ display: "none" }}
+                    accept=".pdf,image/*"
+                    onChange={handleArchivoSeleccionado}
+                  />
+                  <label htmlFor="comprobante-file" className={s.attachBtn} title="Adjuntar archivo o comprobante">
+                    <PaperclipIcon size={16} />
+                    {archivoAdjunto ? (archivoAdjunto.length > 20 ? archivoAdjunto.slice(0, 18) + "…" : archivoAdjunto) : "Adjuntar comprobante"}
+                  </label>
+                </div>
+              </div>
             </div>
           </div>
         </Card>
