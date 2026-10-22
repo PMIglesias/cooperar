@@ -277,6 +277,11 @@ pub fn actualizar_asociado(st: State<AppState>, id: i64, datos: DatosAsociado) -
         params![datos.apellido_nombre.trim(), datos.dni.trim(), datos.telefono, datos.email, id],
     )
     .map_err(s)?;
+    // Mantener sincronizada la nómina de autoridades en caso de que este asociado integre la comisión directiva
+    let _ = tx.execute(
+        "UPDATE comision_directiva SET nombre=?1, dni=?2, telefono=?3, email=?4 WHERE asociado_id=?5",
+        params![datos.apellido_nombre.trim(), datos.dni.trim(), datos.telefono, datos.email, id],
+    );
     tx.execute("DELETE FROM alumnos WHERE asociado_id=?1", params![id]).map_err(s)?;
     for a in &datos.alumnos {
         if !a.nombre.trim().is_empty() {
@@ -525,8 +530,12 @@ pub fn crear_movimiento_caja(st: State<AppState>, datos: DatosMovimientoCaja) ->
 #[tauri::command]
 pub fn anular_movimiento_caja(st: State<AppState>, id: i64) -> R<()> {
     auth_tesorero_o_admin(&st)?;
-    let db = st.db.lock().map_err(s)?;
-    db.execute("UPDATE movimientos_caja SET anulado=1 WHERE id=?1", params![id]).map_err(s)?;
+    let mut db = st.db.lock().map_err(s)?;
+    let tx = db.transaction().map_err(s)?;
+    tx.execute("UPDATE movimientos_caja SET anulado=1 WHERE id=?1", params![id]).map_err(s)?;
+    // Si el movimiento de caja provino de un cobro de cuota societaria, desestimar el pago para que el estado de cuotas y deuda del asociado no quede distorsionado
+    let _ = tx.execute("DELETE FROM pagos WHERE movimiento_id=?1", params![id]);
+    tx.commit().map_err(s)?;
     Ok(())
 }
 
@@ -877,7 +886,11 @@ pub fn listar_copias_seguridad(st: State<AppState>) -> R<Vec<CopiaSeguridadFila>
 
 #[tauri::command]
 pub fn obtener_configuracion(st: State<AppState>, clave: String) -> R<Option<String>> {
-    auth(&st)?;
+    // Claves públicas accesibles antes de iniciar sesión (pantalla de login)
+    let es_publica = matches!(clave.as_str(), "logo_cooperadora" | "asociacion_nombre" | "nombre_escuela");
+    if !es_publica {
+        auth(&st)?;
+    }
     let db = st.db.lock().map_err(s)?;
     db.query_row("SELECT valor FROM configuracion WHERE clave=?1", params![clave], |r| r.get(0)).optional().map_err(s)
 }
@@ -977,7 +990,7 @@ pub fn listar_comision_directiva(st: State<AppState>) -> R<Vec<MiembroComisionFi
 
 #[tauri::command]
 pub fn guardar_miembro_comision(st: State<AppState>, miembro: MiembroComisionFila) -> R<()> {
-    auth(&st)?;
+    auth_secretaria_o_admin(&st)?;
     let db = st.db.lock().map_err(s)?;
     if miembro.id == 0 {
         db.execute(
@@ -1257,8 +1270,10 @@ pub fn eliminar_documento_asamblea(st: State<AppState>, id: i64) -> R<()> {
         .map_err(s)?;
 
     if let Some(filename) = archivo_pdf {
-        let pdf_path = st.data_dir.join("documentos").join(&filename);
-        let _ = std::fs::remove_file(pdf_path);
+        if let Some(clean_name) = std::path::Path::new(&filename).file_name() {
+            let pdf_path = st.data_dir.join("documentos").join(clean_name);
+            let _ = std::fs::remove_file(pdf_path);
+        }
     }
 
     db.execute("DELETE FROM documentos_asambleas WHERE id=?1", params![id]).map_err(s)?;
@@ -1268,7 +1283,10 @@ pub fn eliminar_documento_asamblea(st: State<AppState>, id: i64) -> R<()> {
 #[tauri::command]
 pub fn leer_archivo_documento(st: State<AppState>, archivo_pdf: String) -> R<String> {
     auth(&st)?;
-    let pdf_path = st.data_dir.join("documentos").join(&archivo_pdf);
+    let clean_name = std::path::Path::new(&archivo_pdf)
+        .file_name()
+        .ok_or_else(|| "Nombre de archivo inválido".to_string())?;
+    let pdf_path = st.data_dir.join("documentos").join(clean_name);
     if !pdf_path.exists() {
         return Err("El archivo PDF no existe en el disco".to_string());
     }

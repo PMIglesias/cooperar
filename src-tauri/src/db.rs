@@ -115,7 +115,7 @@ pub fn init(dir: &Path) -> Result<Connection, Box<dyn std::error::Error>> {
             "INSERT INTO usuarios(nombre, dni, email, rol, clave_hash) VALUES
              ('Administrador General', '10000001', 'admin@cooperar.local', 'Superadmin', ?1),
              ('Carlos Gómez', '20000002', 'presidente@cooperar.local', 'Presidente', ?1),
-             ('Mariana López', '30000003', 'secretaria@cooperar.local', 'Secretaria', ?1),
+             ('Mariana López', '31222333', 'secretaria@cooperar.local', 'Secretaria', ?1),
              ('Roberto Fernández', '40000004', 'tesorero@cooperar.local', 'Tesorero', ?1)",
             [&clave_hash],
         )?;

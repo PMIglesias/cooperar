@@ -1,5 +1,5 @@
 // src/pages/Login.tsx
-import { FormEvent, useState } from "react";
+import { FormEvent, useState, useEffect } from "react";
 import { api, Usuario } from "../api";
 import { LogoMark } from "../components/icons";
 import { Field } from "../components/ui/Field";
@@ -10,6 +10,15 @@ export default function Login({ onLogin }: { onLogin: (u: Usuario) => void }) {
   const [dni, setDni] = useState("");
   const [clave, setClave] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [logoBase64, setLogoBase64] = useState<string>("");
+
+  useEffect(() => {
+    api.obtenerConfiguracion("logo_cooperadora")
+      .then((val) => {
+        if (val) setLogoBase64(val);
+      })
+      .catch(() => {});
+  }, []);
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
@@ -30,7 +39,13 @@ export default function Login({ onLogin }: { onLogin: (u: Usuario) => void }) {
   return (
     <div className={s.page}>
       <form className={s.card} onSubmit={submit}>
-        <LogoMark size={90} color="var(--color-primary)" />
+        <div className={s.logoWrapper}>
+          {logoBase64 ? (
+            <img src={logoBase64} alt="Logo Cooperadora" className={s.logoImg} />
+          ) : (
+            <LogoMark size={90} color="var(--color-primary)" />
+          )}
+        </div>
         <h1 className={s.brand}>Cooperar</h1>
         <p className={s.subtitle}>Gestión de la cooperadora escolar</p>
         <Field

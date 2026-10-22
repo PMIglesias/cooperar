@@ -193,6 +193,15 @@ export default function ComisionDirectiva() {
     setInstitucion({ ...institucion, logoBase64: croppedBase64 });
     setLogoCooperadora(croppedBase64);
     setLogoModalOpen(false);
+
+    // Guardado persistente inmediato del logo en la base de datos
+    api.guardarConfiguracion("logo_cooperadora", croppedBase64)
+      .then(() => {
+        setMensajeExito("Logo institucional actualizado y guardado correctamente.");
+      })
+      .catch((err) => {
+        setError(`Error al guardar logo: ${String(err)}`);
+      });
   };
 
   const handleSeleccionarAsociado = async (asociadoIdStr: string) => {
@@ -218,12 +227,40 @@ export default function ComisionDirectiva() {
       // Ignorar fallback
     }
 
+    // Calcular CUIL/CUIT estimativo con módulo 11 estándar de ANSES (por defecto prefijo 20, con ajuste a 23 si es necesario)
+    const calcularCuilEstimado = (dniStr: string) => {
+      const clean = dniStr.replace(/\D/g, "");
+      if (clean.length < 7 || clean.length > 8) return "";
+      const padded = clean.padStart(8, "0");
+      const factores = [5, 4, 3, 2, 7, 6, 5, 4, 3, 2];
+      
+      const obtenerDigito = (prefijo: string) => {
+        const full = prefijo + padded;
+        let suma = 0;
+        for (let i = 0; i < 10; i++) {
+          suma += parseInt(full[i], 10) * factores[i];
+        }
+        const resto = suma % 11;
+        if (resto === 0) return 0;
+        if (resto === 1) return null; // Debe cambiar prefijo a 23
+        return 11 - resto;
+      };
+
+      let prefijo = "20";
+      let dv = obtenerDigito(prefijo);
+      if (dv === null) {
+        prefijo = "23";
+        dv = obtenerDigito(prefijo);
+      }
+      return `${prefijo}-${padded}-${dv}`;
+    };
+
     setMiembroEditando({
       ...miembroEditando,
       asociadoId: asocId,
       nombre: encontrado.apellidoNombre,
       dni: encontrado.dni,
-      cuil: `20-${encontrado.dni}-3`,
+      cuil: miembroEditando.cuil || calcularCuilEstimado(encontrado.dni),
       telefono: tel || miembroEditando.telefono,
       email: email || miembroEditando.email,
     });
@@ -647,6 +684,9 @@ export default function ComisionDirectiva() {
                           onClick={() => {
                             setInstitucion({ ...institucion, logoBase64: "" });
                             setLogoCooperadora("");
+                            api.guardarConfiguracion("logo_cooperadora", "")
+                              .then(() => setMensajeExito("Logo institucional removido."))
+                              .catch(console.error);
                           }}
                         >
                           Quitar logo
