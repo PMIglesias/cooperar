@@ -1,5 +1,7 @@
 // src/components/Sidebar.tsx
+import { useEffect, useState } from "react";
 import { useApp, Route } from "../context";
+import { api } from "../api";
 import { LogoMark, NavIcon, MenuToggleIcon, LogoutIcon } from "./icons";
 import s from "./Sidebar.module.css";
 
@@ -17,6 +19,15 @@ const ITEMS: { route: Route; label: string | [string, string]; labelText: string
 
 export default function Sidebar() {
   const { usuario, route, navigate, logout, sidebarCollapsed, toggleSidebar } = useApp();
+  const [logoCustom, setLogoCustom] = useState<string>("");
+
+  useEffect(() => {
+    api.obtenerConfiguracion("logo_cooperadora")
+      .then((val) => {
+        if (val) setLogoCustom(val);
+      })
+      .catch(() => {});
+  }, []);
 
   const itemsVisibles = ITEMS.filter((it) => {
     // Superadmin tiene acceso a todo
@@ -56,7 +67,15 @@ export default function Sidebar() {
           aria-label={sidebarCollapsed ? "Expandir menú lateral" : "Contraer menú lateral"}
         >
           <span className={s.brandIcon}>
-            <LogoMark size={32} color="#fff" />
+            {logoCustom ? (
+              <img
+                src={logoCustom}
+                alt="Logo Cooperar"
+                className={s.brandLogoImg}
+              />
+            ) : (
+              <LogoMark size={32} color="#fff" />
+            )}
           </span>
           {!sidebarCollapsed && <span className={s.brandText}>Cooperar</span>}
         </button>

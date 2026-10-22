@@ -1,11 +1,12 @@
 // src/pages/ComisionDirectiva.tsx
-import { useEffect, useState, FormEvent } from "react";
+import { useEffect, useState, useRef, FormEvent } from "react";
 import Layout from "../components/Layout";
 import Card from "../components/ui/Card";
 import Button from "../components/ui/Button";
 import Badge from "../components/ui/Badge";
 import DataTable, { Column } from "../components/ui/DataTable";
 import IconButton from "../components/ui/IconButton";
+import Modal from "../components/ui/Modal";
 import { EditIcon, TrashIcon } from "../components/icons";
 import { Field, SelectField } from "../components/ui/Field";
 import { useApp } from "../context";
@@ -188,7 +189,8 @@ export default function ComisionDirectiva() {
     },
     {
       header: "Cargo",
-      width: 170,
+      minWidth: 160,
+      flex: true,
       render: (m) => (
         <span style={{ fontWeight: 600, color: "var(--color-primary)" }}>
           {m.cargo}
@@ -197,7 +199,7 @@ export default function ComisionDirectiva() {
     },
     {
       header: "Apellido y Nombre",
-      width: 220,
+      minWidth: 200,
       flex: true,
       render: (m) => (
         <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: "4px" }}>
@@ -208,27 +210,32 @@ export default function ComisionDirectiva() {
     },
     {
       header: "DNI",
-      width: 110,
+      minWidth: 105,
+      flex: true,
       render: (m) => m.dni,
     },
     {
       header: "CUIL",
-      width: 140,
+      minWidth: 125,
+      flex: true,
       render: (m) => m.cuil,
     },
     {
       header: "Domicilio / Localidad",
-      width: 220,
+      minWidth: 210,
+      flex: true,
       render: (m) => (m.domicilio ? `${m.domicilio}, ${m.localidad}` : m.localidad),
     },
     {
       header: "Teléfono",
-      width: 130,
+      minWidth: 120,
+      flex: true,
       render: (m) => m.telefono || "—",
     },
     {
       header: "Vencimiento",
-      width: 120,
+      minWidth: 110,
+      flex: true,
       render: (m) => <Badge tone="warn">{m.vencimiento}</Badge>,
     },
     ...(puedeEditar
@@ -257,7 +264,8 @@ export default function ComisionDirectiva() {
   const columnsPersonal: Column<PersonalEstablecimientoFila>[] = [
     {
       header: "Cargo Escolar",
-      width: 170,
+      minWidth: 160,
+      flex: true,
       render: (p) => <strong>{p.cargo}</strong>,
     },
     {
@@ -268,12 +276,14 @@ export default function ComisionDirectiva() {
     },
     {
       header: "DNI",
-      width: 120,
+      minWidth: 110,
+      flex: true,
       render: (p) => <code>{p.dni}</code>,
     },
     {
       header: "Teléfono",
-      width: 130,
+      minWidth: 120,
+      flex: true,
       render: (p) => p.telefono || "—",
     },
     {
@@ -284,7 +294,8 @@ export default function ComisionDirectiva() {
     },
     {
       header: "Vínculo con Nómina Oficial",
-      width: 220,
+      minWidth: 200,
+      flex: true,
       render: (p) => {
         if (p.vinculoNomina === "ASESOR") {
           return <span className={s.vinculoBadge}>Asesor Escolar (Fila 16)</span>;
@@ -515,37 +526,96 @@ export default function ComisionDirectiva() {
         {/* TAB 3: ASOCIACIÓN COOPERADORA Y CUENTAS BANCARIAS */}
         {activeTab === "cooperadora" && institucion && (
           <form onSubmit={handleGuardarInstitucion}>
-            <Card title="Datos Legales de la Asociación Cooperadora">
-              <div className={s.configGrid}>
-                <Field
-                  label="Nombre de la Asociación Cooperadora"
-                  disabled={!puedeEditar}
-                  value={institucion.asociacionNombre}
-                  onChange={(e) =>
-                    setInstitucion({ ...institucion, asociacionNombre: e.target.value })
-                  }
-                  required
-                />
-                <Field
-                  label="C.U.I.T. Cooperadora"
-                  disabled={!puedeEditar}
-                  value={institucion.cuit}
-                  onChange={(e) =>
-                    setInstitucion({ ...institucion, cuit: e.target.value })
-                  }
-                  required
-                />
-                <Field
-                  label="Correo Electrónico de la Cooperadora"
-                  type="email"
-                  disabled={!puedeEditar}
-                  value={institucion.emailInstitucional}
-                  onChange={(e) =>
-                    setInstitucion({ ...institucion, emailInstitucional: e.target.value })
-                  }
-                />
+            <Card title="Identidad y Logo de la Asociación Cooperadora">
+              <div className={s.logoSection}>
+                <div className={s.logoPreviewWrapper}>
+                  {institucion.logoBase64 ? (
+                    <img
+                      src={institucion.logoBase64}
+                      alt="Logo Cooperadora"
+                      className={s.logoCircleImg}
+                    />
+                  ) : (
+                    <div className={s.logoCirclePlaceholder}>
+                      <span className={s.logoPlaceholderText}>Sin Logo</span>
+                    </div>
+                  )}
+                </div>
+
+                <div className={s.logoInfo}>
+                  <h4 className={s.logoTitle}>Isotipo / Escudo Institucional</h4>
+                  <p className={s.logoDescription}>
+                    Selecciona una imagen en formato PNG o JPG. Se adaptará automáticamente al círculo distintivo para la aplicación y documentación oficial.
+                  </p>
+                  {puedeEditar && (
+                    <div className={s.logoButtons}>
+                      <label className={s.uploadBtn}>
+                        📷 {institucion.logoBase64 ? "Cambiar imagen" : "Seleccionar imagen"}
+                        <input
+                          type="file"
+                          accept="image/png, image/jpeg, image/webp"
+                          style={{ display: "none" }}
+                          onChange={(e) => {
+                            const file = e.target.files?.[0];
+                            if (file) {
+                              const reader = new FileReader();
+                              reader.onload = (ev) => {
+                                const base64 = ev.target?.result as string;
+                                setInstitucion({ ...institucion, logoBase64: base64 });
+                              };
+                              reader.readAsDataURL(file);
+                            }
+                          }}
+                        />
+                      </label>
+                      {institucion.logoBase64 && (
+                        <button
+                          type="button"
+                          className={s.removeLogoBtn}
+                          onClick={() => setInstitucion({ ...institucion, logoBase64: "" })}
+                        >
+                          Quitar logo
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </div>
               </div>
             </Card>
+
+            <div style={{ marginTop: "var(--space-6)" }}>
+              <Card title="Datos Legales de la Asociación Cooperadora">
+                <div className={s.configGrid}>
+                  <Field
+                    label="Nombre de la Asociación Cooperadora"
+                    disabled={!puedeEditar}
+                    value={institucion.asociacionNombre}
+                    onChange={(e) =>
+                      setInstitucion({ ...institucion, asociacionNombre: e.target.value })
+                    }
+                    required
+                  />
+                  <Field
+                    label="C.U.I.T. Cooperadora"
+                    disabled={!puedeEditar}
+                    value={institucion.cuit}
+                    onChange={(e) =>
+                      setInstitucion({ ...institucion, cuit: e.target.value })
+                    }
+                    required
+                  />
+                  <Field
+                    label="Correo Electrónico de la Cooperadora"
+                    type="email"
+                    disabled={!puedeEditar}
+                    value={institucion.emailInstitucional}
+                    onChange={(e) =>
+                      setInstitucion({ ...institucion, emailInstitucional: e.target.value })
+                    }
+                  />
+                </div>
+              </Card>
+            </div>
 
             <div style={{ marginTop: "var(--space-6)" }}>
               <Card title="Datos de Cuenta Bancaria Oficial (P.I.A.)">

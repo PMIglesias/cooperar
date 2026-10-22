@@ -204,6 +204,7 @@ export interface DatosInstitucionales {
   alias: string;
   cuotaMensual: string;
   cuotaAnual: string;
+  logoBase64?: string;
 }
 
 // Usuarios
@@ -808,7 +809,7 @@ export const api = {
       "cue", "cuit", "domicilio_escuela", "barrio", "localidad",
       "telefono_escuela", "email_institucional", "banco_nombre",
       "banco_sucursal", "cuenta_corriente", "cbu", "alias",
-      "cuota_mensual", "cuota_anual"
+      "cuota_mensual", "cuota_anual", "logo_cooperadora"
     ];
     const res: Record<string, string> = {};
     for (const k of keys) {
@@ -834,6 +835,7 @@ export const api = {
       alias: res.alias || "COOP.EP12.MORON",
       cuotaMensual: res.cuota_mensual || "8000",
       cuotaAnual: res.cuota_anual || "80000",
+      logoBase64: res.logo_cooperadora || "",
     };
   },
 
@@ -857,6 +859,7 @@ export const api = {
       alias: datos.alias,
       cuota_mensual: datos.cuotaMensual,
       cuota_anual: datos.cuotaAnual,
+      logo_cooperadora: datos.logoBase64 || "",
     };
     for (const [k, v] of Object.entries(mapping)) {
       await api.guardarConfiguracion(k, v);
