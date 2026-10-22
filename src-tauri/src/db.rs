@@ -189,11 +189,11 @@ pub fn init(dir: &Path) -> Result<Connection, Box<dyn std::error::Error>> {
     if n_comision == 0 {
         conn.execute(
             "INSERT INTO comision_directiva(orden, cargo, asociado_id, nombre, dni, cuil, domicilio, localidad, telefono, email, vencimiento) VALUES
-             (1, 'PRESIDENTE', NULL, 'Carlos Gómez', '20000002', '20-20000002-3', 'Av. San Martín 1420', 'Morón', '11-4567-1111', 'carlos.gomez@email.com', '31/12/2027'),
+             (1, 'PRESIDENTE', NULL, 'Carlos Gómez', '20000002', '20-20000002-2', 'Av. San Martín 1420', 'Morón', '11-4567-1111', 'carlos.gomez@email.com', '31/12/2027'),
              (2, 'VICEPRESIDENTE', 2, 'Fernández, Valeria', '29888777', '27-29888777-4', 'Belgrano 450', 'Morón', '11-9876-5432', 'valeria.fernandez@email.com', '31/12/2027'),
              (3, 'SECRETARIO', 4, 'López, Mariana', '31222333', '27-31222333-8', 'Mitre 830', 'Morón', '11-6677-8899', 'mariana.lopez@email.com', '31/12/2027'),
-             (4, 'TESORERO', NULL, 'Roberto Fernández', '40000004', '20-40000004-1', 'Sarmiento 112', 'Morón', '11-3344-4444', 'roberto.fernandez@email.com', '31/12/2027'),
-             (5, 'VOCAL TITULAR 1°', 1, 'Álvarez, Marcos', '32111222', '20-32111222-6', 'Rivadavia 310', 'Morón', '11-4567-8901', 'marcos.alvarez@email.com', '31/12/2027'),
+             (4, 'TESORERO', NULL, 'Roberto Fernández', '40000004', '20-40000004-3', 'Sarmiento 112', 'Morón', '11-3344-4444', 'roberto.fernandez@email.com', '31/12/2027'),
+             (5, 'VOCAL TITULAR 1°', 1, 'Álvarez, Marcos', '32111222', '20-32111222-7', 'Rivadavia 310', 'Morón', '11-4567-8901', 'marcos.alvarez@email.com', '31/12/2027'),
              (6, 'VOCAL TITULAR 2°', 8, 'Sánchez, Elena', '27999111', '27-27999111-5', 'Caseros 650', 'Morón', '11-8899-0011', 'elena.sanchez@email.com', '31/12/2027'),
              (7, 'VOCAL TITULAR 3°', 7, 'Romero, Pablo', '30111444', '20-30111444-2', 'Alsina 920', 'Morón', '11-7788-9900', 'pablo.romero@email.com', '31/12/2027'),
              (8, 'VOCAL SUPLENTE 1°', 5, 'Martínez, Diego', '28777666', '20-28777666-9', 'Brown 710', 'Morón', '11-3344-5566', 'diego.martinez@email.com', '31/12/2027'),
