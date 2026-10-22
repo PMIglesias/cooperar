@@ -27,7 +27,7 @@ const OPCIONES_VINCULO = [
 ];
 
 export default function ComisionDirectiva() {
-  const { usuario } = useApp();
+  const { usuario, setLogoCooperadora } = useApp();
   const [activeTab, setActiveTab] = useState<"autoridades" | "establecimiento" | "cooperadora">("autoridades");
   const [comision, setComision] = useState<MiembroComisionFila[]>([]);
   const [personal, setPersonal] = useState<PersonalEstablecimientoFila[]>([]);
@@ -191,6 +191,7 @@ export default function ComisionDirectiva() {
 
     const croppedBase64 = canvas.toDataURL("image/png");
     setInstitucion({ ...institucion, logoBase64: croppedBase64 });
+    setLogoCooperadora(croppedBase64);
     setLogoModalOpen(false);
   };
 
@@ -235,6 +236,9 @@ export default function ComisionDirectiva() {
       setSavingInst(true);
       setError(null);
       await api.guardarDatosInstitucionales(institucion);
+      if (institucion.logoBase64 !== undefined) {
+        setLogoCooperadora(institucion.logoBase64);
+      }
       setMensajeExito("Datos guardados correctamente.");
     } catch (err: any) {
       setError(err?.message || "Error al guardar datos institucionales");
@@ -640,7 +644,10 @@ export default function ComisionDirectiva() {
                         <button
                           type="button"
                           className={s.removeLogoBtn}
-                          onClick={() => setInstitucion({ ...institucion, logoBase64: "" })}
+                          onClick={() => {
+                            setInstitucion({ ...institucion, logoBase64: "" });
+                            setLogoCooperadora("");
+                          }}
                         >
                           Quitar logo
                         </button>

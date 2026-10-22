@@ -11,6 +11,8 @@ export interface AppCtx {
   logout: () => void;
   sidebarCollapsed: boolean;
   toggleSidebar: () => void;
+  logoCooperadora: string;
+  setLogoCooperadora: (logo: string) => void;
 }
 
 export const AppContext = createContext<AppCtx | null>(null);

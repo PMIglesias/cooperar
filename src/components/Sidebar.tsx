@@ -18,16 +18,7 @@ const ITEMS: { route: Route; label: string | [string, string]; labelText: string
 ];
 
 export default function Sidebar() {
-  const { usuario, route, navigate, logout, sidebarCollapsed, toggleSidebar } = useApp();
-  const [logoCustom, setLogoCustom] = useState<string>("");
-
-  useEffect(() => {
-    api.obtenerConfiguracion("logo_cooperadora")
-      .then((val) => {
-        if (val) setLogoCustom(val);
-      })
-      .catch(() => {});
-  }, []);
+  const { usuario, route, navigate, logout, sidebarCollapsed, toggleSidebar, logoCooperadora } = useApp();
 
   const itemsVisibles = ITEMS.filter((it) => {
     // Superadmin tiene acceso a todo
@@ -67,9 +58,9 @@ export default function Sidebar() {
           aria-label={sidebarCollapsed ? "Expandir menú lateral" : "Contraer menú lateral"}
         >
           <span className={s.brandIcon}>
-            {logoCustom ? (
+            {logoCooperadora ? (
               <img
-                src={logoCustom}
+                src={logoCooperadora}
                 alt="Logo Cooperar"
                 className={s.brandLogoImg}
               />

@@ -1,5 +1,5 @@
 // src/App.tsx
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { api, Usuario } from "./api";
 import { AppContext, Route } from "./context";
 import Login from "./pages/Login";
@@ -16,9 +16,20 @@ import Usuarios from "./pages/Usuarios";
 export default function App() {
   const [usuario, setUsuario] = useState<Usuario | null>(null);
   const [route, setRoute] = useState<Route>("inicio");
+  const [logoCooperadora, setLogoCooperadora] = useState<string>("");
   const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(() => {
     return localStorage.getItem("cooperar_sidebar_collapsed") === "true";
   });
+
+  useEffect(() => {
+    if (usuario) {
+      api.obtenerConfiguracion("logo_cooperadora")
+        .then((val) => {
+          if (val) setLogoCooperadora(val);
+        })
+        .catch(() => {});
+    }
+  }, [usuario]);
 
   const toggleSidebar = () => {
     setSidebarCollapsed((prev) => {
@@ -55,6 +66,8 @@ export default function App() {
         logout,
         sidebarCollapsed,
         toggleSidebar,
+        logoCooperadora,
+        setLogoCooperadora,
       }}
     >
       {page}

@@ -829,7 +829,10 @@ pub fn obtener_configuracion(st: State<AppState>, clave: String) -> R<Option<Str
 
 #[tauri::command]
 pub fn guardar_configuracion(st: State<AppState>, clave: String, valor: String) -> R<()> {
-    auth_superadmin(&st)?;
+    let u = auth(&st)?;
+    if u.rol != "Superadmin" && u.rol != "Secretaria" && u.rol != "Presidente" {
+        return Err("Acceso denegado: sólo el Superadministrador, la Presidencia o la Secretaría pueden actualizar la configuración institucional".to_string());
+    }
     let db = st.db.lock().map_err(s)?;
     db.execute("INSERT INTO configuracion(clave, valor) VALUES(?1, ?2) ON CONFLICT(clave) DO UPDATE SET valor=?2", params![clave, valor]).map_err(s)?;
     Ok(())
