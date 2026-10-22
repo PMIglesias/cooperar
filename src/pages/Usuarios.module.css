@@ -123,3 +123,12 @@
   border-radius: var(--radius);
   margin-bottom: var(--space-4);
 }
+
+.warnMsg {
+  color: var(--color-warn);
+  font-size: var(--fs-base);
+  background: var(--color-warn-bg);
+  padding: var(--space-4);
+  border-radius: var(--radius);
+  margin-bottom: var(--space-4);
+}

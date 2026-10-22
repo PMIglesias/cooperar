@@ -765,27 +765,82 @@ pub struct CopiaSeguridadFila {
     pub tamano_bytes: u64,
 }
 
-pub fn ejecutar_copia_interna(st: &AppState) -> R<String> {
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ResultadoBackup {
+    pub creado: bool,
+    pub archivo: String,
+    pub mensaje: String,
+}
+
+pub fn ejecutar_copia_interna(st: &AppState) -> R<ResultadoBackup> {
     let db = st.db.lock().map_err(s)?;
+
+    // 1. Verificar si existen copias previas en el directorio
     let copias_dir = st.data_dir.join("copias");
     std::fs::create_dir_all(&copias_dir).map_err(s)?;
 
+    let mut hay_copias = false;
+    if let Ok(entries) = std::fs::read_dir(&copias_dir) {
+        for entry in entries.flatten() {
+            if let Ok(meta) = entry.metadata() {
+                if meta.is_file() && entry.file_name().to_string_lossy().ends_with(".db") {
+                    hay_copias = true;
+                    break;
+                }
+            }
+        }
+    }
+
+    // 2. Comprobar PRAGMA data_version
+    let data_version_actual: i64 = db.query_row("PRAGMA data_version", [], |r| r.get(0)).map_err(s)?;
+    let ultima_data_version: Option<i64> = db
+        .query_row("SELECT valor FROM configuracion WHERE clave='backup_data_version'", [], |r| r.get(0))
+        .optional()
+        .map_err(s)?
+        .and_then(|v: String| v.parse().ok());
+
+    let ultimo_archivo: Option<String> = db
+        .query_row("SELECT valor FROM configuracion WHERE clave='ultimo_archivo_backup'", [], |r| r.get(0))
+        .optional()
+        .map_err(s)?;
+
+    // Si ya existe al menos una copia física y la versión de datos no ha cambiado, omitir backup
+    if hay_copias {
+        if let Some(prev_ver) = ultima_data_version {
+            if prev_ver == data_version_actual {
+                let archivo_previo = ultimo_archivo.unwrap_or_else(|| "Último respaldo vigente".to_string());
+                return Ok(ResultadoBackup {
+                    creado: false,
+                    archivo: archivo_previo,
+                    mensaje: "Omitido: la base de datos no contiene cambios nuevos desde el último respaldo.".to_string(),
+                });
+            }
+        }
+    }
+
+    // 3. Si hubo cambios o no existe copia, generar snapshot seguro mediante VACUUM INTO
     let now_str: String = db.query_row("SELECT strftime('%Y%m%d_%H%M%S','now','localtime')", [], |r| r.get(0)).map_err(s)?;
     let filename = format!("cooperar_backup_{}.db", now_str);
     let dest_path = copias_dir.join(&filename);
     let dest_str = dest_path.to_string_lossy().to_string();
 
-    // SQLite backup seguro y atómico mediante VACUUM INTO
     db.execute("VACUUM INTO ?1", params![dest_str]).map_err(s)?;
 
     let fecha_humana: String = db.query_row("SELECT datetime('now','localtime')", [], |r| r.get(0)).map_err(s)?;
     db.execute("INSERT INTO configuracion(clave, valor) VALUES('ultima_copia', ?1) ON CONFLICT(clave) DO UPDATE SET valor=?1", params![fecha_humana]).map_err(s)?;
+    db.execute("INSERT INTO configuracion(clave, valor) VALUES('backup_data_version', ?1) ON CONFLICT(clave) DO UPDATE SET valor=?1", params![data_version_actual.to_string()]).map_err(s)?;
+    db.execute("INSERT INTO configuracion(clave, valor) VALUES('ultimo_archivo_backup', ?1) ON CONFLICT(clave) DO UPDATE SET valor=?1", params![filename]).map_err(s)?;
 
-    Ok(filename)
+    Ok(ResultadoBackup {
+        creado: true,
+        archivo: filename.clone(),
+        mensaje: format!("✓ Copia de seguridad creada con éxito: {}", filename),
+    })
 }
 
 #[tauri::command]
-pub fn crear_copia_seguridad(st: State<AppState>) -> R<String> {
+pub fn crear_copia_seguridad(st: State<AppState>) -> R<ResultadoBackup> {
     auth_superadmin(&st)?;
     ejecutar_copia_interna(&st)
 }

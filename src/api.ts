@@ -231,6 +231,12 @@ export interface CopiaSeguridadFila {
   tamanoBytes: number;
 }
 
+export interface ResultadoBackup {
+  creado: boolean;
+  archivo: string;
+  mensaje: string;
+}
+
 export const DEMO_USUARIOS = [
   { dni: "10000001", nombre: "Administrador General", rol: "Superadmin" as Rol, clave: "admin123" },
   { dni: "20000002", nombre: "Carlos Gómez", rol: "Presidente" as Rol, clave: "admin123" },
@@ -655,8 +661,8 @@ export const api = {
   },
 
   // Respaldo y Configuración
-  crearCopiaSeguridad: async (): Promise<string> => {
-    if (isTauri) return invoke<string>("crear_copia_seguridad");
+  crearCopiaSeguridad: async (): Promise<ResultadoBackup> => {
+    if (isTauri) return invoke<ResultadoBackup>("crear_copia_seguridad");
     const name = `cooperar_backup_${Date.now()}.db`;
     mockCopias.unshift({
       nombreArchivo: name,
@@ -664,7 +670,11 @@ export const api = {
       tamanoBytes: 61440,
     });
     mockConfiguracion.ultima_copia = new Date().toLocaleString("es-AR");
-    return name;
+    return {
+      creado: true,
+      archivo: name,
+      mensaje: `✓ Copia de seguridad creada con éxito: ${name}`,
+    };
   },
   listarCopiasSeguridad: async (): Promise<CopiaSeguridadFila[]> => {
     if (isTauri) return invoke<CopiaSeguridadFila[]>("listar_copias_seguridad");

@@ -128,15 +128,19 @@ export default function Usuarios() {
   };
 
   // Manejador Backups
+  const [backupMsgTone, setBackupMsgTone] = useState<"ok" | "warn" | "danger">("ok");
+
   const crearBackup = async () => {
     setCreandoBackup(true);
     setBackupMsg(null);
     try {
-      const archivo = await api.crearCopiaSeguridad();
-      setBackupMsg(`✓ Copia de seguridad creada con éxito: ${archivo}`);
+      const res = await api.crearCopiaSeguridad();
+      setBackupMsg(res.mensaje);
+      setBackupMsgTone(res.creado ? "ok" : "warn");
       cargarCopias();
     } catch (err) {
       setBackupMsg(`Error al crear copia: ${String(err)}`);
+      setBackupMsgTone("danger");
     } finally {
       setCreandoBackup(false);
     }
@@ -311,7 +315,19 @@ export default function Usuarios() {
               </p>
             </Card>
 
-            {backupMsg && <div className={s.successMsg}>{backupMsg}</div>}
+            {backupMsg && (
+              <div
+                className={
+                  backupMsgTone === "ok"
+                    ? s.successMsg
+                    : backupMsgTone === "warn"
+                    ? s.warnMsg
+                    : s.errorMsg
+                }
+              >
+                {backupMsg}
+              </div>
+            )}
 
             <Card title="Historial de copias de seguridad">
               <DataTable
