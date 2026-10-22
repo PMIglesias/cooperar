@@ -44,6 +44,15 @@ export default function ComisionDirectiva() {
   // Modal para crear/editar personal del establecimiento
   const [personalEditando, setPersonalEditando] = useState<PersonalEstablecimientoFila | null>(null);
 
+  // Modal para ajuste y posicionamiento del Logo
+  const [logoModalOpen, setLogoModalOpen] = useState(false);
+  const [tempLogoSrc, setTempLogoSrc] = useState<string>("");
+  const [logoZoom, setLogoZoom] = useState(1);
+  const [logoPos, setLogoPos] = useState({ x: 0, y: 0 });
+  const [isDragging, setIsDragging] = useState(false);
+  const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
+  const imgRef = useRef<HTMLImageElement>(null);
+
   const puedeEditar = usuario.rol === "Secretaria" || usuario.rol === "Superadmin";
 
   const cargarDatos = async () => {
@@ -120,6 +129,69 @@ export default function ComisionDirectiva() {
     } catch (err: any) {
       setError(err?.message || "Error al eliminar personal");
     }
+  };
+
+  const handleSelectLogoFile = (file: File) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const src = e.target?.result as string;
+      setTempLogoSrc(src);
+      setLogoZoom(1);
+      setLogoPos({ x: 0, y: 0 });
+      setLogoModalOpen(true);
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleConfirmCrop = () => {
+    if (!imgRef.current || !institucion) return;
+
+    const img = imgRef.current;
+    const canvas = document.createElement("canvas");
+    const size = 300; // tamaño final del logo circular en alta definición
+    canvas.width = size;
+    canvas.height = size;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+
+    // Crear máscara circular
+    ctx.beginPath();
+    ctx.arc(size / 2, size / 2, size / 2, 0, Math.PI * 2);
+    ctx.closePath();
+    ctx.clip();
+
+    // Fondo blanco suave
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0, 0, size, size);
+
+    // Contenedor visual mide 260px x 260px
+    const viewSize = 260;
+    const scaleFactor = size / viewSize;
+
+    const naturalW = img.naturalWidth || 260;
+    const naturalH = img.naturalHeight || 260;
+    const displayAspect = naturalW / naturalH;
+
+    let baseW = viewSize;
+    let baseH = viewSize;
+    if (displayAspect >= 1) {
+      baseW = viewSize * displayAspect;
+    } else {
+      baseH = viewSize / displayAspect;
+    }
+
+    const renderedW = baseW * logoZoom * scaleFactor;
+    const renderedH = baseH * logoZoom * scaleFactor;
+
+    // Centro del canvas más offset del usuario
+    const drawX = (size - renderedW) / 2 + logoPos.x * scaleFactor;
+    const drawY = (size - renderedH) / 2 + logoPos.y * scaleFactor;
+
+    ctx.drawImage(img, drawX, drawY, renderedW, renderedH);
+
+    const croppedBase64 = canvas.toDataURL("image/png");
+    setInstitucion({ ...institucion, logoBase64: croppedBase64 });
+    setLogoModalOpen(false);
   };
 
   const handleSeleccionarAsociado = async (asociadoIdStr: string) => {
@@ -558,12 +630,8 @@ export default function ComisionDirectiva() {
                           onChange={(e) => {
                             const file = e.target.files?.[0];
                             if (file) {
-                              const reader = new FileReader();
-                              reader.onload = (ev) => {
-                                const base64 = ev.target?.result as string;
-                                setInstitucion({ ...institucion, logoBase64: base64 });
-                              };
-                              reader.readAsDataURL(file);
+                              handleSelectLogoFile(file);
+                              e.target.value = "";
                             }
                           }}
                         />
@@ -914,6 +982,96 @@ export default function ComisionDirectiva() {
             </form>
           </div>
         </div>
+      )}
+
+      {/* MODAL PARA ENCUADRAR Y POSICIONAR EL LOGO */}
+      {logoModalOpen && (
+        <Modal
+          isOpen={logoModalOpen}
+          onClose={() => setLogoModalOpen(false)}
+          title="Ajustar y Posicionar Logo"
+          size="medium"
+          footer={
+            <div style={{ display: "flex", gap: "var(--space-3)", justifyContent: "flex-end", width: "100%" }}>
+              <Button variant="secondary" onClick={() => setLogoModalOpen(false)}>
+                Cancelar
+              </Button>
+              <Button onClick={handleConfirmCrop}>
+                Confirmar y Aplicar Logo
+              </Button>
+            </div>
+          }
+        >
+          <div className={s.cropperContainer}>
+            <p className={s.cropperInstructions}>
+              Arrastra la imagen con el cursor para moverla y usa la barra de aumento para ajustarla dentro del círculo distintivo.
+            </p>
+
+            <div
+              className={s.cropperViewport}
+              onMouseDown={(e) => {
+                e.preventDefault();
+                setIsDragging(true);
+                setDragStart({ x: e.clientX - logoPos.x, y: e.clientY - logoPos.y });
+              }}
+              onMouseMove={(e) => {
+                if (!isDragging) return;
+                setLogoPos({
+                  x: e.clientX - dragStart.x,
+                  y: e.clientY - dragStart.y,
+                });
+              }}
+              onMouseUp={() => setIsDragging(false)}
+              onMouseLeave={() => setIsDragging(false)}
+            >
+              {/* Imagen desplazable y escalable */}
+              <div
+                className={s.cropperCanvasLayer}
+                style={{
+                  transform: `translate(${logoPos.x}px, ${logoPos.y}px) scale(${logoZoom})`,
+                }}
+              >
+                <img
+                  ref={imgRef}
+                  src={tempLogoSrc}
+                  alt="Ajuste de logo"
+                  className={s.cropperImage}
+                  draggable={false}
+                />
+              </div>
+
+              {/* Guía visual con máscara circular */}
+              <div className={s.cropperCircleMask} />
+            </div>
+
+            <div className={s.cropperControls}>
+              <div className={s.zoomControl}>
+                <span className={s.zoomLabel}>Zoom / Escala:</span>
+                <input
+                  type="range"
+                  min="0.5"
+                  max="3"
+                  step="0.05"
+                  value={logoZoom}
+                  onChange={(e) => setLogoZoom(parseFloat(e.target.value))}
+                  className={s.zoomSlider}
+                />
+                <span className={s.zoomValue}>{Math.round(logoZoom * 100)}%</span>
+              </div>
+
+              <button
+                type="button"
+                className={s.resetCropBtn}
+                onClick={() => {
+                  setLogoZoom(1);
+                  setLogoPos({ x: 0, y: 0 });
+                }}
+              >
+                Centrar imagen
+              </button>
+            </div>
+          </div>
+        </Modal>
       )}
     </Layout>
   );
