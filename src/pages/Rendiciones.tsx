@@ -131,7 +131,8 @@ export default function Rendiciones() {
   const columns: Column<RendicionFila>[] = [
     {
       header: "Período",
-      width: 170,
+      minWidth: 150,
+      flex: true,
       render: (r) => <strong>{r.periodo}</strong>,
     },
     {
@@ -144,20 +145,23 @@ export default function Rendiciones() {
         </span>
       ),
     },
-    { header: "Generada el", width: 130, render: (r) => r.generadaEn },
+    { header: "Generada el", minWidth: 120, flex: true, render: (r) => r.generadaEn },
     {
       header: "Ingresos",
-      width: 120,
+      minWidth: 120,
+      flex: true,
       render: (r) => <span style={{ color: "var(--color-ok)", fontWeight: 600 }}>+ {money(r.totalIngresos)}</span>,
     },
     {
       header: "Egresos",
-      width: 120,
+      minWidth: 120,
+      flex: true,
       render: (r) => <span style={{ color: "var(--color-danger)", fontWeight: 600 }}>- {money(r.totalEgresos)}</span>,
     },
     {
       header: "Saldo",
-      width: 130,
+      minWidth: 130,
+      flex: true,
       render: (r) => (
         <strong style={{ color: r.saldoPeriodo >= 0 ? "var(--color-ok)" : "var(--color-danger)" }}>
           {money(r.saldoPeriodo)}
@@ -166,7 +170,8 @@ export default function Rendiciones() {
     },
     {
       header: "Estado",
-      width: 110,
+      minWidth: 110,
+      flex: true,
       render: (r) => (
         <Badge tone={r.estado === "Aprobada" ? "ok" : "warn"}>
           {r.estado === "Aprobada" ? "Aprobada" : "Borrador"}
@@ -175,7 +180,8 @@ export default function Rendiciones() {
     },
     {
       header: "Acciones",
-      width: 130,
+      width: 120,
+      align: "center",
       render: (r) => (
         <div style={{ display: "flex", gap: "6px", alignItems: "center" }}>
           <IconButton

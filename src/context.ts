@@ -9,6 +9,8 @@ export interface AppCtx {
   route: Route;
   navigate: (r: Route) => void;
   logout: () => void;
+  sidebarCollapsed: boolean;
+  toggleSidebar: () => void;
 }
 
 export const AppContext = createContext<AppCtx | null>(null);

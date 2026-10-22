@@ -1,9 +1,13 @@
 // src/pages/Documentacion.tsx
 import { useEffect, useState, useRef } from "react";
 import Layout from "../components/Layout";
+import Button from "../components/ui/Button";
+import Card from "../components/ui/Card";
+import Badge from "../components/ui/Badge";
+import DataTable, { Column } from "../components/ui/DataTable";
 import ConfirmDialog from "../components/ui/ConfirmDialog";
 import IconButton from "../components/ui/IconButton";
-import { EyeIcon, TrashIcon } from "../components/icons";
+import { EyeIcon, TrashIcon, PrinterIcon } from "../components/icons";
 import {
   api,
   DocumentoAsambleaFila,
@@ -323,14 +327,66 @@ export default function Documentacion() {
     }
   };
 
+  const columns: Column<DocumentoAsambleaFila>[] = [
+    { header: "Fecha", minWidth: 120, flex: true, render: (doc) => doc.fechaGeneracion },
+    {
+      header: "Tipo de Formulario",
+      minWidth: 170,
+      flex: true,
+      render: (doc) => (
+        <Badge tone={doc.tipo === "NOMINA_COMISION" ? "primary" : "ok"}>
+          {doc.tipo === "NOMINA_COMISION" ? "Nómina Directiva" : "P.I.A. Cooperadoras"}
+        </Badge>
+      ),
+    },
+    {
+      header: "Título del Documento",
+      minWidth: 260,
+      flex: true,
+      render: (doc) => <strong>{doc.titulo}</strong>,
+    },
+    { header: "Período", minWidth: 100, flex: true, render: (doc) => doc.periodo },
+    { header: "Generado por", minWidth: 160, flex: true, render: (doc) => doc.generadoPor },
+    {
+      header: "Acciones",
+      width: 95,
+      align: "center",
+      render: (doc) => (
+        <div style={{ display: "flex", gap: "6px", justifyContent: "center", alignItems: "center" }}>
+          <IconButton
+            icon={<EyeIcon size={16} />}
+            title="Visualizar e Imprimir PDF"
+            variant="default"
+            square
+            onClick={(e) => {
+              e.stopPropagation();
+              handleVerPdfHistorico(doc);
+            }}
+          />
+          {puedeEliminar && (
+            <IconButton
+              icon={<TrashIcon size={16} />}
+              title="Eliminar documento del historial"
+              variant="danger"
+              square
+              onClick={(e) => {
+                e.stopPropagation();
+                setDocAEliminar(doc);
+              }}
+            />
+          )}
+        </div>
+      ),
+    },
+  ];
+
   return (
     <Layout
       title="Documentación de Asambleas"
       action={
         vista !== "listado" ? (
-          <button
-            type="button"
-            className="btn btn-secondary"
+          <Button
+            variant="secondary"
             onClick={() => {
               setVista("listado");
               setMensajeExito(null);
@@ -338,107 +394,43 @@ export default function Documentacion() {
             }}
           >
             ← Volver al listado
-          </button>
-        ) : undefined
+          </Button>
+        ) : (
+          <div style={{ display: "flex", gap: "var(--space-4)" }}>
+            <Button
+              variant="secondary"
+              disabled={generando || loading}
+              onClick={handleGenerarNomina}
+            >
+              {generando ? "Generando..." : "+ Generar Nómina Comisión"}
+            </Button>
+            <Button
+              disabled={generando || loading}
+              onClick={handleGenerarPia}
+            >
+              {generando ? "Generando..." : "+ Generar P.I.A."}
+            </Button>
+          </div>
+        )
       }
     >
-      {mensajeExito && <div className="alert alert-success">{mensajeExito}</div>}
-      {error && <div className="alert alert-error">{error}</div>}
+      {mensajeExito && <div className={s.successMsg}>{mensajeExito}</div>}
+      {error && <div className={s.errorMsg}>{error}</div>}
 
       {/* VISTA 1: LISTADO DE DOCUMENTOS HISTÓRICOS */}
       {vista === "listado" && (
         <div className={s.container}>
-          <div className={`card ${s.topActions}`}>
-            <button
-              type="button"
-              className="btn btn-primary"
-              disabled={generando || loading}
-              onClick={handleGenerarNomina}
-            >
-              {generando ? "Generando..." : "+ Generar Nómina Comisión Directiva"}
-            </button>
-            <button
-              type="button"
-              className="btn btn-primary"
-              disabled={generando || loading}
-              onClick={handleGenerarPia}
-            >
-              {generando ? "Generando..." : "+ Generar PIA Cooperadoras"}
-            </button>
-          </div>
-
-          <div className="card">
-            <h2 style={{ fontSize: "var(--fs-lg)", fontWeight: 700, marginBottom: "var(--space-4)" }}>
-              Historial de Formularios y Asambleas
-            </h2>
-            <div className="table-responsive">
-              <table className="table">
-                <thead>
-                  <tr>
-                    <th>Fecha</th>
-                    <th>Tipo</th>
-                    <th>Título</th>
-                    <th>Período</th>
-                    <th>Generado por</th>
-                    <th style={{ textAlign: "right" }}>Acciones</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {documentos.length === 0 ? (
-                    <tr>
-                      <td colSpan={6} className={s.emptyState}>
-                        {loading
-                          ? "Cargando registros..."
-                          : "No hay documentos generados aún. Haz clic en los botones superiores para emitir un formulario oficial."}
-                      </td>
-                    </tr>
-                  ) : (
-                    documentos.map((doc) => (
-                      <tr key={doc.id}>
-                        <td>{doc.fechaGeneracion}</td>
-                        <td>
-                          <span
-                            className={
-                              doc.tipo === "NOMINA_COMISION"
-                                ? s.badgeNomina
-                                : s.badgePia
-                            }
-                          >
-                            {doc.tipo === "NOMINA_COMISION"
-                              ? "Nómina Directiva"
-                              : "P.I.A."}
-                          </span>
-                        </td>
-                        <td style={{ fontWeight: 600 }}>{doc.titulo}</td>
-                        <td>{doc.periodo}</td>
-                        <td>{doc.generadoPor}</td>
-                        <td style={{ textAlign: "right" }}>
-                          <div style={{ display: "flex", gap: "6px", justifyContent: "flex-end", alignItems: "center" }}>
-                            <IconButton
-                              icon={<EyeIcon />}
-                              title="Visualizar e Imprimir PDF"
-                              variant="primary"
-                              square
-                              onClick={() => handleVerPdfHistorico(doc)}
-                            />
-                            {puedeEliminar && (
-                              <IconButton
-                                icon={<TrashIcon />}
-                                title="Eliminar documento del historial"
-                                variant="danger"
-                                square
-                                onClick={() => setDocAEliminar(doc)}
-                              />
-                            )}
-                          </div>
-                        </td>
-                      </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </div>
+          <DataTable
+            columns={columns}
+            rows={documentos}
+            rowKey={(doc) => doc.id}
+            onRowClick={(doc) => handleVerPdfHistorico(doc)}
+            emptyMessage={
+              loading
+                ? "Cargando registros..."
+                : "No hay documentos generados aún. Haz clic en los botones superiores para emitir un formulario oficial."
+            }
+          />
         </div>
       )}
 
@@ -450,20 +442,20 @@ export default function Documentacion() {
               <span className={s.previewTitle}>{docActivo.titulo}</span>
             </div>
             <div className={s.previewActions}>
-              <button
-                type="button"
-                className="btn btn-secondary"
+              <Button
+                variant="secondary"
                 onClick={handleImprimir}
+                style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}
               >
-                🖨️ Imprimir
-              </button>
-              <button
-                type="button"
-                className="btn btn-primary"
+                <PrinterIcon size={16} />
+                Imprimir
+              </Button>
+              <Button
+                variant="primary"
                 onClick={handleExportarEscritorio}
               >
                 💾 Guardar copia en Escritorio
-              </button>
+              </Button>
             </div>
           </div>
           <div className={s.iframeWrapper}>

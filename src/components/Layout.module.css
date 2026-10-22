@@ -1,7 +1,12 @@
-/* src/components/Layout.module.css */
 .shell {
-  display: grid; grid-template-columns: var(--sidebar-w) minmax(0, 1fr);
-  height: 100vh; background: var(--color-bg);
+  display: grid;
+  grid-template-columns: var(--sidebar-w, 240px) minmax(0, 1fr);
+  height: 100vh;
+  background: var(--color-bg);
+  transition: grid-template-columns 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.shellCollapsed {
+  grid-template-columns: var(--sidebar-w-collapsed, 68px) minmax(0, 1fr);
 }
 .main { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
 .header {
@@ -12,6 +17,7 @@
 .content {
   display: flex; flex-direction: column; gap: var(--space-7); flex: 1 1 auto; min-height: 0;
   padding: var(--space-8) var(--space-9); overflow-y: auto;
+  scrollbar-gutter: stable;
 }
 .footer {
   padding: var(--space-3) var(--space-9);

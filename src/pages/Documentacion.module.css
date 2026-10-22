@@ -12,6 +12,24 @@
   align-items: center;
 }
 
+.successMsg {
+  color: var(--color-ok);
+  font-size: var(--fs-base);
+  background: var(--color-ok-bg);
+  padding: var(--space-4);
+  border-radius: var(--radius);
+  font-weight: 500;
+}
+
+.errorMsg {
+  color: var(--color-danger);
+  font-size: var(--fs-base);
+  background: var(--color-danger-bg);
+  padding: var(--space-4);
+  border-radius: var(--radius);
+  font-weight: 500;
+}
+
 .emptyState {
   padding: var(--space-8);
   text-align: center;

@@ -143,10 +143,11 @@ Presidente                  Secretario/a`;
   });
 
   const columns: Column<ReunionFila>[] = [
-    { header: "Fecha y hora", width: 160, render: (r) => r.fecha },
+    { header: "Fecha y hora", minWidth: 150, flex: true, render: (r) => r.fecha },
     {
       header: "Tipo",
-      width: 170,
+      minWidth: 170,
+      flex: true,
       render: (r) => (
         <Badge tone={r.tipo === "Asamblea" ? "ok" : "primary"}>
           {r.tipo === "Asamblea" ? "Asamblea General" : "Comisión Directiva"}
@@ -161,7 +162,8 @@ Presidente                  Secretario/a`;
     },
     {
       header: "Estado del acta",
-      width: 150,
+      minWidth: 140,
+      flex: true,
       render: (r) => (
         <Badge tone={r.acta ? "ok" : "warn"}>
           {r.acta ? "Acta redactada" : "Pendiente"}

@@ -216,13 +216,14 @@ export default function Asociados() {
   };
 
   const COLUMNS: Column<AsociadoFila>[] = [
-    { header: "Apellido y nombre", minWidth: 200, flex: true, render: (a) => <strong>{a.apellidoNombre}</strong> },
-    { header: "DNI", width: 120, render: (a) => a.dni },
-    { header: "Teléfono", width: 130, render: (a) => a.telefono || "—" },
+    { header: "Apellido y nombre", minWidth: 220, flex: true, render: (a) => <strong>{a.apellidoNombre}</strong> },
+    { header: "DNI", minWidth: 110, flex: true, render: (a) => a.dni },
+    { header: "Teléfono", minWidth: 130, flex: true, render: (a) => a.telefono || "—" },
     { header: "Alumnos", minWidth: 180, flex: true, render: (a) => a.alumnos || "—" },
     {
       header: "Estado",
-      width: 110,
+      minWidth: 105,
+      flex: true,
       render: (a) => (
         <Badge tone={a.activo === 1 ? "ok" : "danger"}>
           {a.activo === 1 ? "Activo" : "De baja"}
@@ -231,7 +232,8 @@ export default function Asociados() {
     },
     {
       header: "Cuotas",
-      width: 120,
+      minWidth: 115,
+      flex: true,
       render: (a) => <Badge tone={TONE[a.estadoCuotas]}>{a.estadoCuotas}</Badge>,
     },
     {
@@ -258,8 +260,16 @@ export default function Asociados() {
     { header: "Período", width: 120, render: (p) => <Badge tone="ok">{p.periodo}</Badge> },
     { header: "Comprobante", width: 140, render: (p) => p.comprobante || `REC-${p.id}` },
     { header: "Medio de pago", width: 140, render: (p) => p.medio },
-    { header: "Monto", width: 120, render: (p) => <strong>{money(p.monto)}</strong> },
-    { header: "Registrado por", width: 160, flex: true, render: (p) => p.registradoPor },
+    {
+      header: "Registrado por",
+      width: 160,
+      flex: true,
+      render: (p) => {
+        if (p.registradoPorRol) return p.registradoPorRol;
+        const match = p.registradoPor.match(/^([^(]+)/);
+        return match ? match[1].trim() : p.registradoPor;
+      },
+    },
   ];
 
   // -------------------------------------------------------------

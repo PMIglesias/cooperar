@@ -179,10 +179,11 @@ export default function Caja() {
   };
 
   const columns: Column<MovimientoCajaFila>[] = [
-    { header: "Fecha", width: 110, render: (m) => m.fecha },
+    { header: "Fecha", minWidth: 105, flex: true, render: (m) => m.fecha },
     {
       header: "Tipo",
-      width: 120,
+      minWidth: 110,
+      flex: true,
       render: (m) => (
         <Badge tone={m.tipo === "Ingreso" ? "ok" : "danger"}>
           {m.tipo === "Ingreso" ? "Ingreso" : "Egreso"}
@@ -192,7 +193,7 @@ export default function Caja() {
     { header: "Categoría", minWidth: 150, flex: true, render: (m) => m.categoria },
     {
       header: "Descripción",
-      minWidth: 220,
+      minWidth: 240,
       flex: true,
       render: (m) => {
         // En la tabla solo mostramos la primera línea si la descripción es multilínea
@@ -213,12 +214,14 @@ export default function Caja() {
     },
     {
       header: "Comprobante",
-      width: 130,
+      minWidth: 130,
+      flex: true,
       render: (m) => m.comprobante ? m.comprobante : <span style={{ color: "var(--color-text-hint)" }}>—</span>,
     },
     {
       header: "Monto",
-      width: 130,
+      minWidth: 130,
+      flex: true,
       render: (m) => (
         <strong
           style={{

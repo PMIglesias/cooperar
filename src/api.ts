@@ -63,6 +63,8 @@ export interface PagoFila {
   medio: string;
   comprobante: string | null;
   registradoPor: string;
+  registradoPorRol?: string;
+  registradoPorNombre?: string;
 }
 
 export interface DatosPago {
@@ -282,12 +284,12 @@ let mockAsociados: AsociadoDetalle[] = [
 ];
 
 let mockPagos: PagoFila[] = [
-  { id: 1, asociadoId: 1, apellidoNombre: "Álvarez, Marcos", dni: "32111222", periodo: "2026-10", fechaPago: "2026-10-04", monto: 8000, medio: "Efectivo", comprobante: "REC-001", registradoPor: "Roberto Fernández" },
-  { id: 2, asociadoId: 4, apellidoNombre: "López, Mariana", dni: "31222333", periodo: "2026-10", fechaPago: "2026-10-05", monto: 8000, medio: "Transferencia", comprobante: "TRF-1029", registradoPor: "Roberto Fernández" },
-  { id: 3, asociadoId: 5, apellidoNombre: "Martínez, Diego", dni: "28777666", periodo: "2026-10", fechaPago: "2026-10-05", monto: 8000, medio: "Efectivo", comprobante: "REC-002", registradoPor: "Roberto Fernández" },
-  { id: 4, asociadoId: 6, apellidoNombre: "Rodríguez, Laura", dni: "33444555", periodo: "2026-10", fechaPago: "2026-10-06", monto: 8000, medio: "Transferencia", comprobante: "TRF-1033", registradoPor: "Roberto Fernández" },
-  { id: 5, asociadoId: 7, apellidoNombre: "Romero, Pablo", dni: "30111444", periodo: "2026-10", fechaPago: "2026-10-06", monto: 8000, medio: "Efectivo", comprobante: "REC-003", registradoPor: "Roberto Fernández" },
-  { id: 6, asociadoId: 8, apellidoNombre: "Sánchez, Elena", dni: "27999111", periodo: "2026-10", fechaPago: "2026-10-07", monto: 8000, medio: "Transferencia", comprobante: "TRF-1045", registradoPor: "Roberto Fernández" },
+  { id: 1, asociadoId: 1, apellidoNombre: "Álvarez, Marcos", dni: "32111222", periodo: "2026-10", fechaPago: "2026-10-04", monto: 8000, medio: "Efectivo", comprobante: "REC-001", registradoPor: "Tesorero (Roberto Fernández)", registradoPorRol: "Tesorero", registradoPorNombre: "Roberto Fernández" },
+  { id: 2, asociadoId: 4, apellidoNombre: "López, Mariana", dni: "31222333", periodo: "2026-10", fechaPago: "2026-10-05", monto: 8000, medio: "Transferencia", comprobante: "TRF-1029", registradoPor: "Tesorero (Roberto Fernández)", registradoPorRol: "Tesorero", registradoPorNombre: "Roberto Fernández" },
+  { id: 3, asociadoId: 5, apellidoNombre: "Martínez, Diego", dni: "28777666", periodo: "2026-10", fechaPago: "2026-10-05", monto: 8000, medio: "Efectivo", comprobante: "REC-002", registradoPor: "Tesorero (Roberto Fernández)", registradoPorRol: "Tesorero", registradoPorNombre: "Roberto Fernández" },
+  { id: 4, asociadoId: 6, apellidoNombre: "Rodríguez, Laura", dni: "33444555", periodo: "2026-10", fechaPago: "2026-10-06", monto: 8000, medio: "Transferencia", comprobante: "TRF-1033", registradoPor: "Tesorero (Roberto Fernández)", registradoPorRol: "Tesorero", registradoPorNombre: "Roberto Fernández" },
+  { id: 5, asociadoId: 7, apellidoNombre: "Romero, Pablo", dni: "30111444", periodo: "2026-10", fechaPago: "2026-10-06", monto: 8000, medio: "Efectivo", comprobante: "REC-003", registradoPor: "Tesorero (Roberto Fernández)", registradoPorRol: "Tesorero", registradoPorNombre: "Roberto Fernández" },
+  { id: 6, asociadoId: 8, apellidoNombre: "Sánchez, Elena", dni: "27999111", periodo: "2026-10", fechaPago: "2026-10-07", monto: 8000, medio: "Transferencia", comprobante: "TRF-1045", registradoPor: "Tesorero (Roberto Fernández)", registradoPorRol: "Tesorero", registradoPorNombre: "Roberto Fernández" },
 ];
 
 let mockMovimientos: MovimientoCajaFila[] = [

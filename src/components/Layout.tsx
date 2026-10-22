@@ -1,5 +1,6 @@
 // src/components/Layout.tsx
 import { ReactNode } from "react";
+import { useApp } from "../context";
 import Sidebar from "./Sidebar";
 import s from "./Layout.module.css";
 
@@ -12,8 +13,10 @@ interface Props {
 }
 
 export default function Layout({ title, action, headerExtra, footer, children }: Props) {
+  const { sidebarCollapsed } = useApp();
+
   return (
-    <div className={s.shell}>
+    <div className={`${s.shell} ${sidebarCollapsed ? s.shellCollapsed : ""}`}>
       <Sidebar />
       <div className={s.main}>
         <header className={s.header}>

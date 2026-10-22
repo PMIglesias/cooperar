@@ -327,6 +327,8 @@ pub struct PagoFila {
     pub medio: String,
     pub comprobante: Option<String>,
     pub registrado_por: String,
+    pub registrado_por_rol: Option<String>,
+    pub registrado_por_nombre: Option<String>,
 }
 
 #[tauri::command]
@@ -334,7 +336,7 @@ pub fn listar_pagos(st: State<AppState>, busqueda: String, periodo: String) -> R
     auth(&st)?;
     let db = st.db.lock().map_err(s)?;
     let mut q = db.prepare(
-        "SELECT p.id, p.asociado_id, a.apellido_nombre, a.dni, p.periodo, p.fecha_pago, p.monto, p.medio, p.comprobante, u.nombre
+        "SELECT p.id, p.asociado_id, a.apellido_nombre, a.dni, p.periodo, p.fecha_pago, p.monto, p.medio, p.comprobante, u.nombre, u.rol
          FROM pagos p
          JOIN asociados a ON a.id = p.asociado_id
          JOIN usuarios u ON u.id = p.registrado_por
@@ -343,10 +345,15 @@ pub fn listar_pagos(st: State<AppState>, busqueda: String, periodo: String) -> R
          ORDER BY p.fecha_pago DESC, p.id DESC",
     ).map_err(s)?;
     let rows = q.query_map(params![busqueda.trim(), periodo.trim()], |r| {
+        let nombre: String = r.get(9)?;
+        let rol: String = r.get(10)?;
         Ok(PagoFila {
             id: r.get(0)?, asociado_id: r.get(1)?, apellido_nombre: r.get(2)?, dni: r.get(3)?,
             periodo: r.get(4)?, fecha_pago: r.get(5)?, monto: r.get(6)?, medio: r.get(7)?,
-            comprobante: r.get(8)?, registrado_por: r.get(9)?,
+            comprobante: r.get(8)?,
+            registrado_por: format!("{} ({})", rol, nombre),
+            registrado_por_rol: Some(rol),
+            registrado_por_nombre: Some(nombre),
         })
     }).map_err(s)?;
     let v = rows.collect::<Result<Vec<_>, _>>().map_err(s)?;
@@ -358,7 +365,7 @@ pub fn obtener_historial_pagos_asociado(st: State<AppState>, asociado_id: i64) -
     auth(&st)?;
     let db = st.db.lock().map_err(s)?;
     let mut q = db.prepare(
-        "SELECT p.id, p.asociado_id, a.apellido_nombre, a.dni, p.periodo, p.fecha_pago, p.monto, p.medio, p.comprobante, u.nombre
+        "SELECT p.id, p.asociado_id, a.apellido_nombre, a.dni, p.periodo, p.fecha_pago, p.monto, p.medio, p.comprobante, u.nombre, u.rol
          FROM pagos p
          JOIN asociados a ON a.id = p.asociado_id
          JOIN usuarios u ON u.id = p.registrado_por
@@ -366,10 +373,15 @@ pub fn obtener_historial_pagos_asociado(st: State<AppState>, asociado_id: i64) -
          ORDER BY p.periodo DESC, p.fecha_pago DESC",
     ).map_err(s)?;
     let rows = q.query_map(params![asociado_id], |r| {
+        let nombre: String = r.get(9)?;
+        let rol: String = r.get(10)?;
         Ok(PagoFila {
             id: r.get(0)?, asociado_id: r.get(1)?, apellido_nombre: r.get(2)?, dni: r.get(3)?,
             periodo: r.get(4)?, fecha_pago: r.get(5)?, monto: r.get(6)?, medio: r.get(7)?,
-            comprobante: r.get(8)?, registrado_por: r.get(9)?,
+            comprobante: r.get(8)?,
+            registrado_por: format!("{} ({})", rol, nombre),
+            registrado_por_rol: Some(rol),
+            registrado_por_nombre: Some(nombre),
         })
     }).map_err(s)?;
     let v = rows.collect::<Result<Vec<_>, _>>().map_err(s)?;

@@ -160,12 +160,14 @@ export default function Usuarios() {
     },
     {
       header: "DNI (Usuario)",
-      width: 140,
+      minWidth: 130,
+      flex: true,
       render: (u) => <code>{u.dni}</code>,
     },
     {
       header: "Rol",
-      width: 160,
+      minWidth: 150,
+      flex: true,
       render: (u) => {
         let tone: "ok" | "warn" | "primary" = "primary";
         if (u.rol === "Superadmin") tone = "warn";
@@ -176,7 +178,8 @@ export default function Usuarios() {
     { header: "Correo electrónico", minWidth: 200, flex: true, render: (u) => u.email || "—" },
     {
       header: "Estado",
-      width: 120,
+      minWidth: 110,
+      flex: true,
       render: (u) => (
         <Badge tone={u.activo === 1 ? "ok" : "danger"}>
           {u.activo === 1 ? "Activo" : "Inactivo"}
@@ -215,19 +218,21 @@ export default function Usuarios() {
   const columnsCopias: Column<CopiaSeguridadFila>[] = [
     {
       header: "Archivo de respaldo",
-      width: 280,
+      minWidth: 280,
       flex: true,
       render: (c) => <code>{c.nombreArchivo}</code>,
     },
-    { header: "Fecha y hora", width: 200, render: (c) => c.fecha },
+    { header: "Fecha y hora", minWidth: 180, flex: true, render: (c) => c.fecha },
     {
       header: "Tamaño",
-      width: 140,
+      minWidth: 130,
+      flex: true,
       render: (c) => <span>{(c.tamanoBytes / 1024).toFixed(1)} KB</span>,
     },
     {
       header: "Estado",
-      width: 140,
+      minWidth: 130,
+      flex: true,
       render: () => <Badge tone="ok">Copia íntegra</Badge>,
     },
   ];

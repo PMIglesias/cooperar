@@ -16,6 +16,17 @@ import Usuarios from "./pages/Usuarios";
 export default function App() {
   const [usuario, setUsuario] = useState<Usuario | null>(null);
   const [route, setRoute] = useState<Route>("inicio");
+  const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(() => {
+    return localStorage.getItem("cooperar_sidebar_collapsed") === "true";
+  });
+
+  const toggleSidebar = () => {
+    setSidebarCollapsed((prev) => {
+      const next = !prev;
+      localStorage.setItem("cooperar_sidebar_collapsed", String(next));
+      return next;
+    });
+  };
 
   if (!usuario) return <Login onLogin={setUsuario} />;
 
@@ -36,7 +47,16 @@ export default function App() {
   else page = <Dashboard />;
 
   return (
-    <AppContext.Provider value={{ usuario, route, navigate: setRoute, logout }}>
+    <AppContext.Provider
+      value={{
+        usuario,
+        route,
+        navigate: setRoute,
+        logout,
+        sidebarCollapsed,
+        toggleSidebar,
+      }}
+    >
       {page}
     </AppContext.Provider>
   );

@@ -1,6 +1,6 @@
-// src/pages/Cuotas.tsx
 import { useEffect, useState, FormEvent } from "react";
 import { api, PagoFila, AsociadoFila, money } from "../api";
+import { useApp } from "../context";
 import Layout from "../components/Layout";
 import Button from "../components/ui/Button";
 import Card from "../components/ui/Card";
@@ -31,6 +31,7 @@ const MEDIOS_PAGO = [
 ];
 
 export default function Cuotas() {
+  const { usuario } = useApp();
   const [vista, setVista] = useState<"lista" | "nuevo" | "recibo">("lista");
 
   const [pagos, setPagos] = useState<PagoFila[]>([]);
@@ -122,7 +123,9 @@ export default function Cuotas() {
         monto: montoNum,
         medio: pagoMedio,
         comprobante: pagoComprobante.trim() || `REC-${nuevoId.toString().slice(-4)}`,
-        registradoPor: "Usuario actual",
+        registradoPor: `${usuario.rol} (${usuario.nombre})`,
+        registradoPorRol: usuario.rol,
+        registradoPorNombre: usuario.nombre,
       });
 
       cargarPagos();
@@ -137,31 +140,44 @@ export default function Cuotas() {
   const totalRecaudado = pagos.reduce((acc, p) => acc + p.monto, 0);
 
   const columns: Column<PagoFila>[] = [
-    { header: "Fecha", width: 110, render: (p) => p.fechaPago },
+    { header: "Fecha", minWidth: 105, flex: true, render: (p) => p.fechaPago },
     {
       header: "Comprobante",
-      width: 130,
+      minWidth: 135,
+      flex: true,
       render: (p) => p.comprobante || `REC-${p.id}`,
     },
     {
       header: "Asociado",
-      minWidth: 200,
+      minWidth: 220,
       flex: true,
       render: (p) => <strong>{p.apellidoNombre}</strong>,
     },
-    { header: "DNI", width: 115, render: (p) => p.dni },
+    { header: "DNI", minWidth: 110, flex: true, render: (p) => p.dni },
     {
       header: "Período",
-      width: 105,
+      minWidth: 100,
+      flex: true,
       render: (p) => <Badge tone="ok">{p.periodo}</Badge>,
     },
-    { header: "Medio", width: 125, render: (p) => p.medio },
+    { header: "Medio", minWidth: 110, flex: true, render: (p) => p.medio },
     {
       header: "Monto",
-      width: 120,
+      minWidth: 120,
+      flex: true,
       render: (p) => <strong>{money(p.monto)}</strong>,
     },
-    { header: "Registrado por", minWidth: 140, flex: true, render: (p) => p.registradoPor },
+    {
+      header: "Registrado por",
+      minWidth: 140,
+      flex: true,
+      render: (p) => {
+        // En la tabla se muestra únicamente el rol
+        if (p.registradoPorRol) return p.registradoPorRol;
+        const match = p.registradoPor.match(/^([^(]+)/);
+        return match ? match[1].trim() : p.registradoPor;
+      },
+    },
     {
       header: "Acciones",
       width: 85,

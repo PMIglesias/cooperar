@@ -37,12 +37,15 @@ export default function DataTable<T>({
     "--cols": columns
       .map((c) => {
         if (c.flex) {
-          return `minmax(${c.minWidth || c.width || 120}px, 1fr)`;
+          return `minmax(${c.minWidth || c.width || 100}px, 1fr)`;
         }
         if (c.width) {
           return `${c.width}px`;
         }
-        return `minmax(${c.minWidth || 100}px, 1fr)`;
+        if (c.minWidth) {
+          return `minmax(${c.minWidth}px, 1fr)`;
+        }
+        return `minmax(80px, 1fr)`;
       })
       .join(" "),
     "--pr": `${rightPad}px`,

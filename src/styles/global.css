@@ -55,6 +55,7 @@
   --radius-login: 16px;
 
   --sidebar-w: 240px;
+  --sidebar-w-collapsed: 68px;
   --header-h: 72px;
 }
 
@@ -68,3 +69,29 @@ body {
 }
 h1, h2, p { margin: 0; }
 button, input, select { font-family: inherit; }
+
+/* Scrollbars visibles y modernos para Windows/Webkit */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #cbd5e1 transparent;
+}
+
+*::-webkit-scrollbar {
+  width: 9px;
+  height: 9px;
+}
+
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+*::-webkit-scrollbar-thumb {
+  background-color: #cbd5e1;
+  border-radius: 6px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background-color: #94a3b8;
+}
