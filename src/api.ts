@@ -692,6 +692,11 @@ export const api = {
     if (isTauri) return invoke<string>("restaurar_copia_seguridad", { archivo });
     return `Base de datos restaurada correctamente desde ${archivo}`;
   },
+  eliminarCopiaSeguridad: async (archivo: string): Promise<string> => {
+    if (isTauri) return invoke<string>("eliminar_copia_seguridad", { archivo });
+    mockCopias = mockCopias.filter((x) => x.nombreArchivo !== archivo);
+    return `Copia de seguridad eliminada: ${archivo}`;
+  },
   obtenerConfiguracion: async (clave: string): Promise<string | null> => {
     if (isTauri) return invoke<string | null>("obtener_configuracion", { clave });
     return mockConfiguracion[clave] || null;

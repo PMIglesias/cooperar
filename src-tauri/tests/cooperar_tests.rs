@@ -225,6 +225,11 @@ fn test_dynamic_backup_and_restoration() {
         assert_eq!(existe_flag, 0, "Los datos deben volver al estado del snapshot restaurado");
     }
 
+    // 4. Probar eliminación de copia de seguridad
+    let res_delete = commands::eliminar_copia_interna(&state, &backup_file).expect("Eliminar backup");
+    assert!(res_delete.contains("eliminada correctamente"));
+    assert!(!test_dir.join("copias").join(&backup_file).exists(), "El archivo de copia debe haberse borrado físicamente");
+
     let _ = fs::remove_dir_all(&test_dir);
 }
 

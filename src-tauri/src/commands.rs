@@ -989,6 +989,26 @@ pub fn restaurar_copia_seguridad(st: State<AppState>, archivo: String) -> R<Stri
     restaurar_copia_interna(&st, &archivo)
 }
 
+pub fn eliminar_copia_interna(st: &AppState, archivo: &str) -> R<String> {
+    let clean_name = sanitizar_nombre_archivo(archivo)?;
+    if !clean_name.ends_with(".db") {
+        return Err("El archivo de respaldo debe tener extensión .db".to_string());
+    }
+    let copias_dir = st.data_dir.join("copias");
+    let backup_path = copias_dir.join(&clean_name);
+    if !backup_path.exists() {
+        return Err(format!("El archivo de respaldo '{}' no existe en el almacenamiento", clean_name));
+    }
+    std::fs::remove_file(&backup_path).map_err(s)?;
+    Ok(format!("Copia de seguridad '{}' eliminada correctamente", clean_name))
+}
+
+#[tauri::command]
+pub fn eliminar_copia_seguridad(st: State<AppState>, archivo: String) -> R<String> {
+    auth_superadmin(&st)?;
+    eliminar_copia_interna(&st, &archivo)
+}
+
 #[tauri::command]
 pub fn obtener_configuracion(st: State<AppState>, clave: String) -> R<Option<String>> {
     // Claves públicas accesibles antes de iniciar sesión (pantalla de login)

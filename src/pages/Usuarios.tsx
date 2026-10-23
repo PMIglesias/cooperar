@@ -30,7 +30,6 @@ export default function Usuarios() {
 
   // --- TAB USUARIOS ---
   const [usuarios, setUsuarios] = useState<UsuarioFila[]>([]);
-  const [busquedaUsuario, setBusquedaUsuario] = useState("");
   const [editingUserId, setEditingUserId] = useState<number | null>(null);
   const [userNombre, setUserNombre] = useState("");
   const [userDni, setUserDni] = useState("");
@@ -132,6 +131,8 @@ export default function Usuarios() {
   const [backupMsgTone, setBackupMsgTone] = useState<"ok" | "warn" | "danger">("ok");
   const [copiaParaRestaurar, setCopiaParaRestaurar] = useState<CopiaSeguridadFila | null>(null);
   const [restaurando, setRestaurando] = useState(false);
+  const [copiaParaEliminar, setCopiaParaEliminar] = useState<CopiaSeguridadFila | null>(null);
+  const [eliminandoBackup, setEliminandoBackup] = useState(false);
 
   const crearBackup = async () => {
     setCreandoBackup(true);
@@ -168,14 +169,23 @@ export default function Usuarios() {
     }
   };
 
-  const usuariosFiltrados = usuarios.filter((u) => {
-    return (
-      !busquedaUsuario ||
-      u.nombre.toLowerCase().includes(busquedaUsuario.toLowerCase()) ||
-      u.dni.includes(busquedaUsuario) ||
-      u.rol.toLowerCase().includes(busquedaUsuario.toLowerCase())
-    );
-  });
+  const confirmarEliminarCopia = async () => {
+    if (!copiaParaEliminar) return;
+    setEliminandoBackup(true);
+    setBackupMsg(null);
+    try {
+      const msg = await api.eliminarCopiaSeguridad(copiaParaEliminar.nombreArchivo);
+      setBackupMsg(msg);
+      setBackupMsgTone("ok");
+      setCopiaParaEliminar(null);
+      cargarCopias();
+    } catch (err) {
+      setBackupMsg(`Error al eliminar copia: ${String(err)}`);
+      setBackupMsgTone("danger");
+    } finally {
+      setEliminandoBackup(false);
+    }
+  };
 
   const columnsUsuarios: Column<UsuarioFila>[] = [
     {
@@ -262,20 +272,32 @@ export default function Usuarios() {
       render: () => <Badge tone="ok">Copia íntegra</Badge>,
     },
     {
-      header: "Acción",
-      width: 120,
+      header: "Acciones",
+      width: 220,
       align: "center",
       render: (c) => (
-        <Button
-          variant="secondary"
-          title={`Restaurar base de datos desde ${c.nombreArchivo}`}
-          onClick={(e) => {
-            e.stopPropagation();
-            setCopiaParaRestaurar(c);
-          }}
-        >
-          Restaurar
-        </Button>
+        <div style={{ display: "flex", gap: "8px", alignItems: "center", justifyContent: "center" }}>
+          <Button
+            variant="secondary"
+            title={`Restaurar base de datos desde ${c.nombreArchivo}`}
+            onClick={(e) => {
+              e.stopPropagation();
+              setCopiaParaRestaurar(c);
+            }}
+          >
+            Restaurar
+          </Button>
+          <Button
+            variant="danger"
+            title={`Eliminar archivo de copia ${c.nombreArchivo}`}
+            onClick={(e) => {
+              e.stopPropagation();
+              setCopiaParaEliminar(c);
+            }}
+          >
+            Eliminar
+          </Button>
+        </div>
       ),
     },
   ];
@@ -317,20 +339,9 @@ export default function Usuarios() {
         {/* --- TAB 1: USUARIOS --- */}
         {activeTab === "usuarios" && (
           <div>
-            <div style={{ marginBottom: "var(--space-4)" }}>
-              <Field
-                label="Buscar usuario por nombre, DNI o rol"
-                type="search"
-                placeholder="Escribí un nombre o DNI…"
-                value={busquedaUsuario}
-                onChange={(e) => setBusquedaUsuario(e.target.value)}
-                width={360}
-              />
-            </div>
-
             <DataTable
               columns={columnsUsuarios}
-              rows={usuariosFiltrados}
+              rows={usuarios}
               rowKey={(u) => u.id}
               emptyMessage="No se encontraron usuarios registrados."
             />
@@ -400,6 +411,29 @@ export default function Usuarios() {
           variant="danger"
           onConfirm={confirmarRestaurarCopia}
           onCancel={() => setCopiaParaRestaurar(null)}
+        />
+
+        <ConfirmDialog
+          isOpen={copiaParaEliminar !== null}
+          title="Eliminar copia de seguridad"
+          message={
+            copiaParaEliminar ? (
+              <div>
+                <p style={{ margin: 0 }}>
+                  ¿Está seguro de que desea eliminar permanentemente el archivo de respaldo{" "}
+                  <strong>"{copiaParaEliminar.nombreArchivo}"</strong>?
+                </p>
+                <p style={{ marginTop: "12px", color: "var(--color-danger)", fontSize: "0.85rem", fontWeight: 600 }}>
+                  ⚠️ Advertencia: Esta acción borrará el archivo físico de respaldo del disco de forma irreversible.
+                </p>
+              </div>
+            ) : null
+          }
+          confirmLabel={eliminandoBackup ? "Eliminando..." : "Eliminar respaldo"}
+          cancelLabel="Cancelar"
+          variant="danger"
+          onConfirm={confirmarEliminarCopia}
+          onCancel={() => setCopiaParaEliminar(null)}
         />
       </Layout>
     );

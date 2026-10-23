@@ -95,6 +95,7 @@ fn main() {
             commands::crear_copia_seguridad,
             commands::listar_copias_seguridad,
             commands::restaurar_copia_seguridad,
+            commands::eliminar_copia_seguridad,
             commands::obtener_configuracion,
             commands::guardar_configuracion,
             commands::obtener_ruta_datos,
