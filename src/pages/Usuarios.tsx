@@ -14,6 +14,7 @@ import DataTable, { Column } from "../components/ui/DataTable";
 import IconButton from "../components/ui/IconButton";
 import { EditIcon, ToggleActiveIcon } from "../components/icons";
 import { Field, SelectField } from "../components/ui/Field";
+import ConfirmDialog from "../components/ui/ConfirmDialog";
 import s from "./Usuarios.module.css";
 
 const ROLES: { value: Rol; label: string }[] = [
@@ -129,6 +130,8 @@ export default function Usuarios() {
 
   // Manejador Backups
   const [backupMsgTone, setBackupMsgTone] = useState<"ok" | "warn" | "danger">("ok");
+  const [copiaParaRestaurar, setCopiaParaRestaurar] = useState<CopiaSeguridadFila | null>(null);
+  const [restaurando, setRestaurando] = useState(false);
 
   const crearBackup = async () => {
     setCreandoBackup(true);
@@ -143,6 +146,25 @@ export default function Usuarios() {
       setBackupMsgTone("danger");
     } finally {
       setCreandoBackup(false);
+    }
+  };
+
+  const confirmarRestaurarCopia = async () => {
+    if (!copiaParaRestaurar) return;
+    setRestaurando(true);
+    setBackupMsg(null);
+    try {
+      const msg = await api.restaurarCopiaSeguridad(copiaParaRestaurar.nombreArchivo);
+      setBackupMsg(msg);
+      setBackupMsgTone("ok");
+      setCopiaParaRestaurar(null);
+      cargarCopias();
+      cargarUsuarios();
+    } catch (err) {
+      setBackupMsg(`Error al restaurar respaldo: ${String(err)}`);
+      setBackupMsgTone("danger");
+    } finally {
+      setRestaurando(false);
     }
   };
 
@@ -238,6 +260,23 @@ export default function Usuarios() {
       minWidth: 130,
       flex: true,
       render: () => <Badge tone="ok">Copia íntegra</Badge>,
+    },
+    {
+      header: "Acción",
+      width: 120,
+      align: "center",
+      render: (c) => (
+        <Button
+          variant="secondary"
+          title={`Restaurar base de datos desde ${c.nombreArchivo}`}
+          onClick={(e) => {
+            e.stopPropagation();
+            setCopiaParaRestaurar(c);
+          }}
+        >
+          Restaurar
+        </Button>
+      ),
     },
   ];
 
@@ -339,6 +378,29 @@ export default function Usuarios() {
             </Card>
           </div>
         )}
+
+        <ConfirmDialog
+          isOpen={copiaParaRestaurar !== null}
+          title="Restaurar copia de seguridad (RF21)"
+          message={
+            copiaParaRestaurar ? (
+              <div>
+                <p style={{ margin: 0 }}>
+                  ¿Está seguro de que desea restaurar la base de datos a partir del respaldo{" "}
+                  <strong>"{copiaParaRestaurar.nombreArchivo}"</strong>?
+                </p>
+                <p style={{ marginTop: "12px", color: "var(--color-danger)", fontSize: "0.85rem", fontWeight: 600 }}>
+                  ⚠️ Advertencia: Todos los cambios, pagos y movimientos registrados posteriormente a esta fecha serán reemplazados por el contenido del archivo de copia.
+                </p>
+              </div>
+            ) : null
+          }
+          confirmLabel={restaurando ? "Restaurando..." : "Restaurar base de datos"}
+          cancelLabel="Cancelar"
+          variant="danger"
+          onConfirm={confirmarRestaurarCopia}
+          onCancel={() => setCopiaParaRestaurar(null)}
+        />
       </Layout>
     );
   }

@@ -1,154 +1,229 @@
 // src-tauri/tests/cooperar_tests.rs
+use cooperar::{commands, db, AppState};
+use rusqlite::params;
 use std::fs;
 use std::path::PathBuf;
 
 #[test]
 fn test_db_initialization_and_schema() {
-    let test_dir = PathBuf::from("target").join("test_db_init");
+    let test_dir = PathBuf::from("target").join("test_db_init_real");
     let _ = fs::remove_dir_all(&test_dir);
     fs::create_dir_all(&test_dir).expect("Crear dir de test");
 
-    let db_path = test_dir.join("cooperar.db");
-    let conn = rusqlite::Connection::open(&db_path).expect("Abrir db");
-    conn.execute_batch("PRAGMA foreign_keys = ON;").unwrap();
+    // 1. Invoca directamente la inicialización real de la base de datos de la aplicación
+    let conn = db::init(&test_dir).expect("db::init debe inicializar la base exitosamente");
 
-    let _tables: Vec<String> = conn
-        .prepare("SELECT name FROM sqlite_master WHERE type='table'")
-        .unwrap()
-        .query_map([], |r| r.get(0))
-        .unwrap()
-        .collect::<Result<Vec<_>, _>>()
-        .unwrap();
+    // 2. Comprobar que las tablas institucionales y de seguridad existen
+    let expected_tables = vec![
+        "usuarios",
+        "asociados",
+        "alumnos",
+        "movimientos_caja",
+        "pagos",
+        "reuniones",
+        "rendiciones",
+        "comision_directiva",
+        "personal_establecimiento",
+        "documentos_asambleas",
+        "configuracion",
+    ];
 
-    assert!(db_path.exists());
+    for table in expected_tables {
+        let count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?1",
+                params![table],
+                |r| r.get(0),
+            )
+            .expect("Consulta de tabla sqlite_master");
+        assert_eq!(count, 1, "La tabla {} debe existir en la base de datos", table);
+    }
+
+    // 3. Comprobar la vista de padrón
+    let view_count: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='view' AND name='v_asociados'",
+            [],
+            |r| r.get(0),
+        )
+        .expect("Consulta de vista v_asociados");
+    assert_eq!(view_count, 1, "La vista v_asociados debe estar creada");
+
+    // 4. Comprobar usuarios iniciales con contraseña hashed
+    let superadmin_hash: String = conn
+        .query_row(
+            "SELECT clave_hash FROM usuarios WHERE rol='Superadmin'",
+            [],
+            |r| r.get(0),
+        )
+        .expect("Usuario Superadmin inicial");
+    assert!(db::verify("admin123", &superadmin_hash), "La contraseña inicial 'admin123' debe verificar contra el hash Argon2");
+
     let _ = fs::remove_dir_all(&test_dir);
 }
 
 #[test]
 fn test_cuil_modulo_11_verification() {
-    let verificar_cuil = |dni_str: &str| -> String {
-        let clean = dni_str.replace(|c: char| !c.is_numeric(), "");
-        let padded = format!("{:0>8}", clean);
-        let factores = [5, 4, 3, 2, 7, 6, 5, 4, 3, 2];
+    // Llama directamente a la función oficial de la aplicación (db::calcular_cuil_modulo_11)
+    assert_eq!(db::calcular_cuil_modulo_11("20000002"), Some("20-20000002-2".to_string()));
+    assert_eq!(db::calcular_cuil_modulo_11("40000004"), Some("20-40000004-3".to_string()));
+    assert_eq!(db::calcular_cuil_modulo_11("32111222"), Some("20-32111222-7".to_string()));
 
-        let calc_dv = |prefijo: &str| -> Option<u32> {
-            let full = format!("{}{}", prefijo, padded);
-            let mut suma = 0;
-            for (i, c) in full.chars().enumerate() {
-                let d = c.to_digit(10).unwrap();
-                suma += d * factores[i];
-            }
-            let resto = suma % 11;
-            if resto == 0 {
-                Some(0)
-            } else if resto == 1 {
-                None
-            } else {
-                Some(11 - resto)
-            }
-        };
+    // Casos con caracteres de formateo
+    assert_eq!(db::calcular_cuil_modulo_11("32.111.222"), Some("20-32111222-7".to_string()));
 
-        let mut prefijo = "20";
-        let mut dv = calc_dv(prefijo);
-        if dv.is_none() {
-            prefijo = "23";
-            dv = calc_dv(prefijo);
-        }
-        format!("{}-{}-{}", prefijo, padded, dv.unwrap())
-    };
-
-    assert_eq!(verificar_cuil("20000002"), "20-20000002-2");
-    assert_eq!(verificar_cuil("40000004"), "20-40000004-3");
-    assert_eq!(verificar_cuil("32111222"), "20-32111222-7");
+    // Casos inválidos
+    assert_eq!(db::calcular_cuil_modulo_11("123"), None);
+    assert_eq!(db::calcular_cuil_modulo_11(""), None);
 }
 
 #[test]
 fn test_cross_data_integrity_asociado_comision_and_caja_pagos() {
-    let test_dir = PathBuf::from("target").join("test_integrity");
+    let test_dir = PathBuf::from("target").join("test_integrity_real");
     let _ = fs::remove_dir_all(&test_dir);
     fs::create_dir_all(&test_dir).expect("Crear dir de test");
 
-    let db_path = test_dir.join("cooperar.db");
-    let conn = rusqlite::Connection::open(&db_path).expect("Abrir db");
-    conn.execute_batch("PRAGMA foreign_keys = ON;").unwrap();
+    let mut conn = db::init(&test_dir).expect("Inicializar base de datos");
 
-    conn.execute_batch("
-        CREATE TABLE asociados(id INTEGER PRIMARY KEY, apellido_nombre TEXT NOT NULL, dni TEXT NOT NULL, telefono TEXT, email TEXT, fecha_alta TEXT NOT NULL DEFAULT (date('now')), exento INTEGER DEFAULT 0, activo INTEGER DEFAULT 1);
-        CREATE TABLE alumnos(id INTEGER PRIMARY KEY, asociado_id INTEGER NOT NULL REFERENCES asociados(id) ON DELETE CASCADE, nombre TEXT NOT NULL, curso TEXT NOT NULL);
-        CREATE TABLE comision_directiva(id INTEGER PRIMARY KEY, orden INTEGER NOT NULL, cargo TEXT NOT NULL, asociado_id INTEGER REFERENCES asociados(id) ON DELETE SET NULL, nombre TEXT NOT NULL, dni TEXT NOT NULL, telefono TEXT, email TEXT);
-        CREATE TABLE movimientos_caja(id INTEGER PRIMARY KEY, fecha TEXT NOT NULL, tipo TEXT NOT NULL, categoria TEXT NOT NULL, descripcion TEXT NOT NULL, monto INTEGER NOT NULL, comprobante TEXT, anulado INTEGER NOT NULL DEFAULT 0);
-        CREATE TABLE pagos(id INTEGER PRIMARY KEY, asociado_id INTEGER NOT NULL REFERENCES asociados(id), periodo TEXT NOT NULL, fecha_pago TEXT NOT NULL, monto INTEGER NOT NULL, medio TEXT NOT NULL, comprobante TEXT, movimiento_id INTEGER REFERENCES movimientos_caja(id));
-        
-        CREATE VIEW v_asociados AS
-        SELECT *,
-          CASE WHEN exento = 1 THEN 'Exento'
-               WHEN (CAST(strftime('%Y','now') AS INTEGER) * 12 + CAST(strftime('%m','now') AS INTEGER))
-                  - (CAST(substr(ult,1,4) AS INTEGER) * 12 + CAST(substr(ult,6,2) AS INTEGER)) > 0 THEN 'Con deuda'
-               ELSE 'Al día' END AS estado_cuotas
-        FROM (
-          SELECT a.*,
-            COALESCE((SELECT MAX(periodo) FROM pagos WHERE asociado_id = a.id), strftime('%Y-%m', a.fecha_alta, '-1 month')) AS ult
-          FROM asociados a
-        );
-    ").unwrap();
+    // 1. Obtener el asociado 1 y verificar vinculación existente en Comisión Directiva (Álvarez Marcos)
+    let nombre_comision_previo: String = conn
+        .query_row(
+            "SELECT nombre FROM comision_directiva WHERE asociado_id=1",
+            [],
+            |r| r.get(0),
+        )
+        .expect("Miembro de comisión directiva vinculado al asociado 1");
+    assert_eq!(nombre_comision_previo, "Álvarez, Marcos");
 
-    // 1. Insertar asociado y vincularlo en la comisión directiva
-    conn.execute("INSERT INTO asociados(id, apellido_nombre, dni, telefono, email, fecha_alta) VALUES(1, 'Álvarez, Marcos', '32111222', '11-4567-8901', 'marcos@test.com', '2026-01-01')", []).unwrap();
-    conn.execute("INSERT INTO comision_directiva(id, orden, cargo, asociado_id, nombre, dni, telefono, email) VALUES(1, 5, 'VOCAL TITULAR 1°', 1, 'Álvarez, Marcos', '32111222', '11-4567-8901', 'marcos@test.com')", []).unwrap();
+    // 2. Modificar asociado usando la función real de la aplicación
+    let nuevos_datos = commands::DatosAsociado {
+        apellido_nombre: "Álvarez Ramos, Marcos".to_string(),
+        dni: "32111222".to_string(),
+        telefono: Some("11-9999-8888".to_string()),
+        email: Some("marcos.nuevo@test.com".to_string()),
+        alumnos: vec![commands::NuevoAlumno {
+            nombre: "Lucía Álvarez Ramos".to_string(),
+            curso: "3° A".to_string(),
+        }],
+    };
 
-    // 2. Simular actualización de asociado con sincronización cruzada
-    let nuevo_nombre = "Álvarez Ramos, Marcos";
-    let nuevo_tel = "11-9999-8888";
-    conn.execute("UPDATE asociados SET apellido_nombre=?1, telefono=?2 WHERE id=1", rusqlite::params![nuevo_nombre, nuevo_tel]).unwrap();
-    conn.execute("UPDATE comision_directiva SET nombre=?1, telefono=?2 WHERE asociado_id=1", rusqlite::params![nuevo_nombre, nuevo_tel]).unwrap();
+    commands::actualizar_asociado_interno(&mut conn, 1, &nuevos_datos)
+        .expect("actualizar_asociado_interno debe sincronizar datos");
 
-    let comision_nombre: String = conn.query_row("SELECT nombre FROM comision_directiva WHERE asociado_id=1", [], |r| r.get(0)).unwrap();
-    let comision_tel: String = conn.query_row("SELECT telefono FROM comision_directiva WHERE asociado_id=1", [], |r| r.get(0)).unwrap();
-    assert_eq!(comision_nombre, nuevo_nombre);
-    assert_eq!(comision_tel, nuevo_tel);
+    // Verificar sincronización cruzada automática en la comisión directiva
+    let comision_nombre: String = conn
+        .query_row(
+            "SELECT nombre FROM comision_directiva WHERE asociado_id=1",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    let comision_tel: String = conn
+        .query_row(
+            "SELECT telefono FROM comision_directiva WHERE asociado_id=1",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(comision_nombre, "Álvarez Ramos, Marcos");
+    assert_eq!(comision_tel, "11-9999-8888");
 
     // 3. Probar vinculación cruzada Caja <-> Pagos <-> Deuda en v_asociados
-    let periodo_actual = "2026-10";
-    conn.execute("INSERT INTO movimientos_caja(id, fecha, tipo, categoria, descripcion, monto) VALUES(10, '2026-10-15', 'Ingreso', 'Cuotas', 'Cobro cuota Marcos', 8000)", []).unwrap();
-    conn.execute("INSERT INTO pagos(id, asociado_id, periodo, fecha_pago, monto, medio, movimiento_id) VALUES(100, 1, ?1, '2026-10-15', 8000, 'Efectivo', 10)", rusqlite::params![periodo_actual]).unwrap();
+    // Período dinámico para que no dependa de si el test se ejecuta en octubre, noviembre o meses posteriores
+    let periodo_actual: String = conn
+        .query_row("SELECT strftime('%Y-%m','now','localtime')", [], |r| r.get(0))
+        .unwrap();
 
-    let estado_inicial: String = conn.query_row("SELECT estado_cuotas FROM v_asociados WHERE id=1", [], |r| r.get(0)).unwrap();
-    assert_eq!(estado_inicial, "Al día");
+    let datos_pago = commands::DatosPago {
+        asociado_id: 2, // Asociado 2 inicia con deuda
+        periodo: periodo_actual.clone(),
+        monto: 8000,
+        medio: "Efectivo".to_string(),
+        comprobante: Some("REC-TEST-999".to_string()),
+    };
 
-    // Anular movimiento de caja y eliminar pago correspondiente
-    conn.execute("UPDATE movimientos_caja SET anulado=1 WHERE id=10", []).unwrap();
-    conn.execute("DELETE FROM pagos WHERE movimiento_id=10", []).unwrap();
+    // Llamar a registrar_pago_interno
+    let pago_id = commands::registrar_pago_interno(&mut conn, &datos_pago, 4)
+        .expect("registrar_pago_interno debe registrar el pago y su movimiento en caja");
 
-    let estado_posterior: String = conn.query_row("SELECT estado_cuotas FROM v_asociados WHERE id=1", [], |r| r.get(0)).unwrap();
-    assert_eq!(estado_posterior, "Con deuda");
+    let mov_id: i64 = conn
+        .query_row("SELECT movimiento_id FROM pagos WHERE id=?1", params![pago_id], |r| r.get(0))
+        .unwrap();
+
+    // El asociado debe quedar "Al día"
+    let estado_al_dia: String = conn
+        .query_row("SELECT estado_cuotas FROM v_asociados WHERE id=2", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(estado_al_dia, "Al día");
+
+    // 4. Anular movimiento de caja usando anular_movimiento_caja_interno
+    commands::anular_movimiento_caja_interno(
+        &mut conn,
+        mov_id,
+        Some("Comprobante duplicado por error de ventanilla"),
+    )
+    .expect("anular_movimiento_caja_interno debe anular el movimiento");
+
+    // RNF05: Soft delete - El pago no debe ser eliminado de la base, sino marcado como anulado=1
+    let (pago_anulado, pago_monto): (i64, i64) = conn
+        .query_row("SELECT anulado, monto FROM pagos WHERE id=?1", params![pago_id], |r| {
+            Ok((r.get(0)?, r.get(1)?))
+        })
+        .expect("El registro de pago debe preservarse en la base (soft delete)");
+    assert_eq!(pago_anulado, 1, "El pago debe estar marcado como anulado=1");
+    assert_eq!(pago_monto, 8000);
+
+    // RF14: El motivo de anulación debe haberse registrado en movimientos_caja
+    let motivo_guardado: String = conn
+        .query_row("SELECT motivo_anulacion FROM movimientos_caja WHERE id=?1", params![mov_id], |r| r.get(0))
+        .unwrap();
+    assert_eq!(motivo_guardado, "Comprobante duplicado por error de ventanilla");
+
+    // El asociado 2 debe figurar ahora nuevamente "Con deuda"
+    let estado_deuda: String = conn
+        .query_row("SELECT estado_cuotas FROM v_asociados WHERE id=2", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(estado_deuda, "Con deuda");
 
     let _ = fs::remove_dir_all(&test_dir);
 }
 
 #[test]
-fn test_dynamic_backup_versioning() {
-    let test_dir = PathBuf::from("target").join("test_backup");
+fn test_dynamic_backup_and_restoration() {
+    let test_dir = PathBuf::from("target").join("test_backup_real");
     let _ = fs::remove_dir_all(&test_dir);
     fs::create_dir_all(&test_dir).expect("Crear dir de test");
 
-    let db_path = test_dir.join("cooperar.db");
-    let conn = rusqlite::Connection::open(&db_path).expect("Abrir db");
-    conn.execute_batch("
-        CREATE TABLE configuracion(clave TEXT PRIMARY KEY, valor TEXT NOT NULL);
-        CREATE TABLE items(id INTEGER PRIMARY KEY, valor TEXT);
-    ").unwrap();
+    let conn = db::init(&test_dir).expect("Inicializar base de datos");
+    let state = AppState::new(conn, test_dir.clone());
 
-    // Consultamos PRAGMA data_version
-    let v1: i64 = conn.query_row("PRAGMA data_version", [], |r| r.get(0)).unwrap();
+    // 1. Ejecutar copia interna por primera vez
+    let r1 = commands::ejecutar_copia_interna(&state).expect("ejecutar_copia_interna debe crear primer backup");
+    assert!(r1.creado, "La primera copia de seguridad debe crearse exitosamente");
+    let backup_file = r1.archivo;
+    assert!(test_dir.join("copias").join(&backup_file).exists(), "El archivo de copia debe existir físicamente en disco");
 
-    // Sin mutaciones en otra conexión o cambio de commit, el pragma se mantiene constante
-    let v2: i64 = conn.query_row("PRAGMA data_version", [], |r| r.get(0)).unwrap();
-    assert_eq!(v1, v2);
+    // 2. Si no hubo mutaciones de datos, la siguiente llamada debe omitir el backup (ahorro de disco)
+    let r2 = commands::ejecutar_copia_interna(&state).expect("ejecutar_copia_interna sin cambios");
+    assert!(!r2.creado, "Si los datos no sufrieron alteraciones, no debe duplicar copias");
 
-    // Guardar flag de versión simulando backup
-    conn.execute("INSERT INTO configuracion(clave, valor) VALUES('backup_data_version', ?1)", rusqlite::params![v1.to_string()]).unwrap();
-    let saved_ver: String = conn.query_row("SELECT valor FROM configuracion WHERE clave='backup_data_version'", [], |r| r.get(0)).unwrap();
-    assert_eq!(saved_ver, v1.to_string());
+    // 3. Probar restauración de copia de seguridad (RF21)
+    // Mutamos la base
+    {
+        let db = state.db.lock().unwrap();
+        db.execute("INSERT INTO configuracion(clave, valor) VALUES('test_flag', 'modificado')", []).unwrap();
+    }
+
+    // Restauramos desde la copia previa
+    let res_restore = commands::restaurar_copia_interna(&state, &backup_file).expect("Restauración de backup");
+    assert!(res_restore.contains("restaurada correctamente"));
+
+    // El flag modificado no debe existir porque restauramos el estado anterior
+    {
+        let db = state.db.lock().unwrap();
+        let existe_flag: i64 = db.query_row("SELECT COUNT(*) FROM configuracion WHERE clave='test_flag'", [], |r| r.get(0)).unwrap();
+        assert_eq!(existe_flag, 0, "Los datos deben volver al estado del snapshot restaurado");
+    }
 
     let _ = fs::remove_dir_all(&test_dir);
 }
@@ -159,47 +234,126 @@ fn test_path_traversal_sanitization() {
         "../../etc/passwd",
         "..\\..\\windows\\system32\\calc.exe",
         "nested/folder/documento.pdf",
-        "documento_asamblea_2026.pdf",
     ];
 
     for raw in malformed_names {
-        let clean = std::path::Path::new(raw)
-            .file_name()
-            .and_then(|n| n.to_str())
-            .unwrap();
-
-        assert!(!clean.contains('/'));
-        assert!(!clean.contains('\\'));
-        assert!(!clean.contains(".."));
+        let res = commands::sanitizar_nombre_archivo(raw);
+        if let Ok(clean) = res {
+            assert!(!clean.contains('/'));
+            assert!(!clean.contains('\\'));
+            assert!(!clean.contains(".."));
+        }
     }
+
+    // Nombre válido legítimo
+    let valid = commands::sanitizar_nombre_archivo("documento_asamblea_2026.pdf").expect("Archivo válido");
+    assert_eq!(valid, "documento_asamblea_2026.pdf");
+}
+
+#[test]
+fn test_pagos_duplicate_and_amount_validations() {
+    let test_dir = PathBuf::from("target").join("test_pagos_val_real");
+    let _ = fs::remove_dir_all(&test_dir);
+    fs::create_dir_all(&test_dir).expect("Crear dir de test");
+
+    let mut conn = db::init(&test_dir).expect("Inicializar base de datos");
+
+    let periodo_actual: String = conn
+        .query_row("SELECT strftime('%Y-%m','now','localtime')", [], |r| r.get(0))
+        .unwrap();
+
+    // 1. Rechazo de monto menor o igual a cero
+    let pago_invalido = commands::DatosPago {
+        asociado_id: 1,
+        periodo: periodo_actual.clone(),
+        monto: 0,
+        medio: "Efectivo".to_string(),
+        comprobante: None,
+    };
+    let err_monto = commands::registrar_pago_interno(&mut conn, &pago_invalido, 4);
+    assert!(err_monto.is_err(), "No se debe permitir registrar un pago con monto <= 0");
+
+    // 2. Pago válido
+    let pago_valido = commands::DatosPago {
+        asociado_id: 3, // Asociado 3 no tiene pago en periodo actual
+        periodo: periodo_actual.clone(),
+        monto: 8000,
+        medio: "Transferencia".to_string(),
+        comprobante: Some("TRF-001".to_string()),
+    };
+    let pago_id = commands::registrar_pago_interno(&mut conn, &pago_valido, 4).expect("Registro de pago legítimo");
+    assert!(pago_id > 0);
+
+    // 3. Intento de registrar un segundo pago para el mismo período y asociado -> debe rechazarse
+    let pago_duplicado = commands::DatosPago {
+        asociado_id: 3,
+        periodo: periodo_actual.clone(),
+        monto: 8000,
+        medio: "Efectivo".to_string(),
+        comprobante: Some("REC-DUPLICADO".to_string()),
+    };
+    let err_duplicado = commands::registrar_pago_interno(&mut conn, &pago_duplicado, 4);
+    assert!(err_duplicado.is_err(), "Se debe rechazar un pago duplicado para el mismo período");
+    assert!(err_duplicado.unwrap_err().contains("ya cuenta con un pago registrado"));
+
+    let _ = fs::remove_dir_all(&test_dir);
+}
+
+#[test]
+fn test_eliminar_rendicion_protection() {
+    let test_dir = PathBuf::from("target").join("test_rendicion_protection");
+    let _ = fs::remove_dir_all(&test_dir);
+    fs::create_dir_all(&test_dir).expect("Crear dir de test");
+
+    let conn = db::init(&test_dir).expect("Inicializar base de datos");
+
+    // Crear rendición en estado Borrador
+    conn.execute(
+        "INSERT INTO rendiciones(id, periodo, desde, hasta, generada_en, generada_por, estado)
+         VALUES(10, '2026-10', '2026-10-01', '2026-10-31', datetime('now'), 1, 'Borrador')",
+        [],
+    ).unwrap();
+
+    // Eliminar borrador debe funcionar
+    assert!(commands::eliminar_rendicion_interno(&conn, 10).is_ok());
+
+    // Crear rendición en estado Aprobada
+    conn.execute(
+        "INSERT INTO rendiciones(id, periodo, desde, hasta, generada_en, generada_por, estado)
+         VALUES(20, '2026-09', '2026-09-01', '2026-09-30', datetime('now'), 1, 'Aprobada')",
+        [],
+    ).unwrap();
+
+    // Intentar eliminar rendición aprobada debe ser rechazado
+    let res = commands::eliminar_rendicion_interno(&conn, 20);
+    assert!(res.is_err());
+    assert_eq!(
+        res.unwrap_err(),
+        "No se puede eliminar una rendición de cuentas que ya ha sido aprobada"
+    );
+
+    let _ = fs::remove_dir_all(&test_dir);
 }
 
 #[test]
 fn test_rendiciones_balance_calculo() {
-    let test_dir = PathBuf::from("target").join("test_rendiciones");
+    let test_dir = PathBuf::from("target").join("test_rendiciones_calc");
     let _ = fs::remove_dir_all(&test_dir);
     fs::create_dir_all(&test_dir).expect("Crear dir de test");
 
-    let db_path = test_dir.join("cooperar.db");
-    let conn = rusqlite::Connection::open(&db_path).expect("Abrir db");
-    conn.execute_batch("
-        CREATE TABLE movimientos_caja(
-            id INTEGER PRIMARY KEY,
-            fecha TEXT NOT NULL,
-            tipo TEXT NOT NULL,
-            monto INTEGER NOT NULL,
-            anulado INTEGER NOT NULL DEFAULT 0
-        );
-    ").unwrap();
+    let conn = db::init(&test_dir).expect("Inicializar base de datos");
+
+    // Limpiamos movimientos para el test de cálculo
+    conn.execute("DELETE FROM movimientos_caja", []).unwrap();
 
     // Ingresos: 50.000 + 20.000, 10.000 anulado (no debe sumarse)
-    conn.execute("INSERT INTO movimientos_caja(fecha, tipo, monto, anulado) VALUES('2026-10-01', 'Ingreso', 50000, 0)", []).unwrap();
-    conn.execute("INSERT INTO movimientos_caja(fecha, tipo, monto, anulado) VALUES('2026-10-05', 'Ingreso', 20000, 0)", []).unwrap();
-    conn.execute("INSERT INTO movimientos_caja(fecha, tipo, monto, anulado) VALUES('2026-10-06', 'Ingreso', 10000, 1)", []).unwrap();
+    conn.execute("INSERT INTO movimientos_caja(fecha, tipo, categoria, descripcion, monto, anulado) VALUES('2026-10-01', 'Ingreso', 'Cuotas', 'Cuotas', 50000, 0)", []).unwrap();
+    conn.execute("INSERT INTO movimientos_caja(fecha, tipo, categoria, descripcion, monto, anulado) VALUES('2026-10-05', 'Ingreso', 'Donaciones', 'Donación', 20000, 0)", []).unwrap();
+    conn.execute("INSERT INTO movimientos_caja(fecha, tipo, categoria, descripcion, monto, anulado) VALUES('2026-10-06', 'Ingreso', 'Cuotas', 'Anulado', 10000, 1)", []).unwrap();
 
     // Egresos: 15.000 + 5.000
-    conn.execute("INSERT INTO movimientos_caja(fecha, tipo, monto, anulado) VALUES('2026-10-10', 'Egreso', 15000, 0)", []).unwrap();
-    conn.execute("INSERT INTO movimientos_caja(fecha, tipo, monto, anulado) VALUES('2026-10-12', 'Egreso', 5000, 0)", []).unwrap();
+    conn.execute("INSERT INTO movimientos_caja(fecha, tipo, categoria, descripcion, monto, anulado) VALUES('2026-10-10', 'Egreso', 'Insumos', 'Librería', 15000, 0)", []).unwrap();
+    conn.execute("INSERT INTO movimientos_caja(fecha, tipo, categoria, descripcion, monto, anulado) VALUES('2026-10-12', 'Egreso', 'Limpieza', 'Lavandina', 5000, 0)", []).unwrap();
 
     let ing: i64 = conn.query_row(
         "SELECT COALESCE(SUM(monto), 0) FROM movimientos_caja WHERE tipo='Ingreso' AND anulado=0 AND fecha BETWEEN '2026-10-01' AND '2026-10-31'",

@@ -85,6 +85,7 @@ export interface MovimientoCajaFila {
   monto: number;
   comprobante: string | null;
   anulado: number;
+  motivoAnulacion?: string | null;
 }
 
 export interface DatosMovimientoCaja {
@@ -109,6 +110,7 @@ export interface ReunionFila {
   tipo: "Comisión" | "Asamblea";
   temas: string;
   acta: string | null;
+  archivoAdjunto?: string | null;
   asistentesCount: number;
 }
 
@@ -558,10 +560,13 @@ export const api = {
     });
     return id;
   },
-  anularMovimientoCaja: async (id: number): Promise<void> => {
-    if (isTauri) return invoke<void>("anular_movimiento_caja", { id });
+  anularMovimientoCaja: async (id: number, motivo?: string): Promise<void> => {
+    if (isTauri) return invoke<void>("anular_movimiento_caja", { id, motivo: motivo || null });
     const m = mockMovimientos.find((x) => x.id === id);
-    if (m) m.anulado = 1;
+    if (m) {
+      m.anulado = 1;
+      m.motivoAnulacion = motivo || "Anulado por tesorería / administración";
+    }
   },
 
   // Reuniones
@@ -582,10 +587,13 @@ export const api = {
     });
     return id;
   },
-  guardarActa: async (id: number, acta: string): Promise<void> => {
-    if (isTauri) return invoke<void>("guardar_acta", { id, acta });
+  guardarActa: async (id: number, acta: string, archivoAdjunto?: string): Promise<void> => {
+    if (isTauri) return invoke<void>("guardar_acta", { id, acta, archivoAdjunto: archivoAdjunto || null });
     const r = mockReuniones.find((x) => x.id === id);
-    if (r) r.acta = acta;
+    if (r) {
+      r.acta = acta;
+      if (archivoAdjunto !== undefined) r.archivoAdjunto = archivoAdjunto;
+    }
   },
 
   // Rendiciones
@@ -679,6 +687,10 @@ export const api = {
   listarCopiasSeguridad: async (): Promise<CopiaSeguridadFila[]> => {
     if (isTauri) return invoke<CopiaSeguridadFila[]>("listar_copias_seguridad");
     return mockCopias;
+  },
+  restaurarCopiaSeguridad: async (archivo: string): Promise<string> => {
+    if (isTauri) return invoke<string>("restaurar_copia_seguridad", { archivo });
+    return `Base de datos restaurada correctamente desde ${archivo}`;
   },
   obtenerConfiguracion: async (clave: string): Promise<string | null> => {
     if (isTauri) return invoke<string | null>("obtener_configuracion", { clave });

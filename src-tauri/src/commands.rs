@@ -267,10 +267,7 @@ pub fn crear_asociado(st: State<AppState>, datos: DatosAsociado) -> R<i64> {
     Ok(id)
 }
 
-#[tauri::command]
-pub fn actualizar_asociado(st: State<AppState>, id: i64, datos: DatosAsociado) -> R<()> {
-    auth_secretaria_o_admin(&st)?;
-    let mut db = st.db.lock().map_err(s)?;
+pub fn actualizar_asociado_interno(db: &mut Connection, id: i64, datos: &DatosAsociado) -> R<()> {
     let tx = db.transaction().map_err(s)?;
     tx.execute(
         "UPDATE asociados SET apellido_nombre=?1,dni=?2,telefono=?3,email=?4 WHERE id=?5",
@@ -289,6 +286,13 @@ pub fn actualizar_asociado(st: State<AppState>, id: i64, datos: DatosAsociado) -
         }
     }
     tx.commit().map_err(s)
+}
+
+#[tauri::command]
+pub fn actualizar_asociado(st: State<AppState>, id: i64, datos: DatosAsociado) -> R<()> {
+    auth_secretaria_o_admin(&st)?;
+    let mut db = st.db.lock().map_err(s)?;
+    actualizar_asociado_interno(&mut db, id, &datos)
 }
 
 #[tauri::command]
@@ -403,11 +407,23 @@ pub struct DatosPago {
     pub comprobante: Option<String>,
 }
 
-#[tauri::command]
-pub fn registrar_pago(st: State<AppState>, datos: DatosPago) -> R<i64> {
-    let u = auth_tesorero_o_admin(&st)?;
-    let mut db = st.db.lock().map_err(s)?;
+pub fn registrar_pago_interno(db: &mut Connection, datos: &DatosPago, usuario_id: i64) -> R<i64> {
+    if datos.monto <= 0 {
+        return Err("El monto de la cuota debe ser mayor a 0".to_string());
+    }
+
     let tx = db.transaction().map_err(s)?;
+
+    // Validar que no se cobre dos veces el mismo período para el mismo asociado
+    let ya_pagado: bool = tx.query_row(
+        "SELECT COUNT(*) FROM pagos WHERE asociado_id=?1 AND periodo=?2 AND anulado=0",
+        params![datos.asociado_id, datos.periodo.trim()],
+        |r| r.get::<_, i64>(0),
+    ).map_err(s)? > 0;
+
+    if ya_pagado {
+        return Err(format!("El asociado ya cuenta con un pago registrado para el período {}.", datos.periodo.trim()));
+    }
 
     let asociado_nombre: String = tx.query_row("SELECT apellido_nombre FROM asociados WHERE id=?1", params![datos.asociado_id], |r| r.get(0)).map_err(s)?;
     
@@ -438,13 +454,20 @@ pub fn registrar_pago(st: State<AppState>, datos: DatosPago) -> R<i64> {
 
     // 2. Registrar pago
     tx.execute(
-        "INSERT INTO pagos(asociado_id, periodo, fecha_pago, monto, medio, comprobante, registrado_por, movimiento_id) VALUES(?1, ?2, date('now','localtime'), ?3, ?4, ?5, ?6, ?7)",
-        params![datos.asociado_id, datos.periodo.trim(), datos.monto, datos.medio.trim(), datos.comprobante, u.id, mov_id],
+        "INSERT INTO pagos(asociado_id, periodo, fecha_pago, monto, medio, comprobante, anulado, registrado_por, movimiento_id) VALUES(?1, ?2, date('now','localtime'), ?3, ?4, ?5, 0, ?6, ?7)",
+        params![datos.asociado_id, datos.periodo.trim(), datos.monto, datos.medio.trim(), datos.comprobante, usuario_id, mov_id],
     ).map_err(s)?;
     let pago_id = tx.last_insert_rowid();
 
     tx.commit().map_err(s)?;
     Ok(pago_id)
+}
+
+#[tauri::command]
+pub fn registrar_pago(st: State<AppState>, datos: DatosPago) -> R<i64> {
+    let u = auth_tesorero_o_admin(&st)?;
+    let mut db = st.db.lock().map_err(s)?;
+    registrar_pago_interno(&mut db, &datos, u.id)
 }
 
 // ----------------------------------------------------
@@ -462,6 +485,7 @@ pub struct MovimientoCajaFila {
     pub monto: i64,
     pub comprobante: Option<String>,
     pub anulado: i64,
+    pub motivo_anulacion: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -478,7 +502,7 @@ pub fn listar_movimientos_caja(st: State<AppState>, tipo: String, categoria: Str
     auth(&st)?;
     let db = st.db.lock().map_err(s)?;
     let mut q = db.prepare(
-        "SELECT id, fecha, tipo, categoria, descripcion, monto, comprobante, anulado
+        "SELECT id, fecha, tipo, categoria, descripcion, monto, comprobante, anulado, motivo_anulacion
          FROM movimientos_caja
          WHERE (?1 = 'Todos' OR tipo = ?1)
            AND (?2 = 'Todas' OR categoria = ?2)
@@ -489,6 +513,7 @@ pub fn listar_movimientos_caja(st: State<AppState>, tipo: String, categoria: Str
         Ok(MovimientoCajaFila {
             id: r.get(0)?, fecha: r.get(1)?, tipo: r.get(2)?, categoria: r.get(3)?,
             descripcion: r.get(4)?, monto: r.get(5)?, comprobante: r.get(6)?, anulado: r.get(7)?,
+            motivo_anulacion: r.get(8)?,
         })
     }).map_err(s)?;
     let v = rows.collect::<Result<Vec<_>, _>>().map_err(s)?;
@@ -519,6 +544,9 @@ pub struct DatosMovimientoCaja {
 #[tauri::command]
 pub fn crear_movimiento_caja(st: State<AppState>, datos: DatosMovimientoCaja) -> R<i64> {
     auth_tesorero_o_admin(&st)?;
+    if datos.monto <= 0 {
+        return Err("El monto del movimiento de caja debe ser mayor a 0".to_string());
+    }
     let db = st.db.lock().map_err(s)?;
     db.execute(
         "INSERT INTO movimientos_caja(fecha, tipo, categoria, descripcion, monto, comprobante) VALUES(date('now','localtime'), ?1, ?2, ?3, ?4, ?5)",
@@ -527,16 +555,24 @@ pub fn crear_movimiento_caja(st: State<AppState>, datos: DatosMovimientoCaja) ->
     Ok(db.last_insert_rowid())
 }
 
-#[tauri::command]
-pub fn anular_movimiento_caja(st: State<AppState>, id: i64) -> R<()> {
-    auth_tesorero_o_admin(&st)?;
-    let mut db = st.db.lock().map_err(s)?;
+pub fn anular_movimiento_caja_interno(db: &mut Connection, id: i64, motivo: Option<&str>) -> R<()> {
     let tx = db.transaction().map_err(s)?;
-    tx.execute("UPDATE movimientos_caja SET anulado=1 WHERE id=?1", params![id]).map_err(s)?;
-    // Si el movimiento de caja provino de un cobro de cuota societaria, desestimar el pago para que el estado de cuotas y deuda del asociado no quede distorsionado
-    let _ = tx.execute("DELETE FROM pagos WHERE movimiento_id=?1", params![id]);
+    let motivo_txt = motivo.unwrap_or("Anulación registrada por tesorería / administración").trim();
+    tx.execute(
+        "UPDATE movimientos_caja SET anulado=1, motivo_anulacion=?1 WHERE id=?2",
+        params![motivo_txt, id],
+    ).map_err(s)?;
+    // RNF05: Soft delete en pagos: se marca anulado=1 en vez de DELETE físico
+    tx.execute("UPDATE pagos SET anulado=1 WHERE movimiento_id=?1", params![id]).map_err(s)?;
     tx.commit().map_err(s)?;
     Ok(())
+}
+
+#[tauri::command]
+pub fn anular_movimiento_caja(st: State<AppState>, id: i64, motivo: Option<String>) -> R<()> {
+    auth_tesorero_o_admin(&st)?;
+    let mut db = st.db.lock().map_err(s)?;
+    anular_movimiento_caja_interno(&mut db, id, motivo.as_deref())
 }
 
 // ----------------------------------------------------
@@ -551,6 +587,7 @@ pub struct ReunionFila {
     pub tipo: String,
     pub temas: String,
     pub acta: Option<String>,
+    pub archivo_adjunto: Option<String>,
     pub asistentes_count: i64,
 }
 
@@ -559,7 +596,7 @@ pub fn listar_reuniones(st: State<AppState>) -> R<Vec<ReunionFila>> {
     auth(&st)?;
     let db = st.db.lock().map_err(s)?;
     let mut q = db.prepare(
-        "SELECT r.id, r.fecha, r.tipo, r.temas, r.acta, COUNT(a.asociado_id)
+        "SELECT r.id, r.fecha, r.tipo, r.temas, r.acta, r.archivo_adjunto, COUNT(a.asociado_id)
          FROM reuniones r
          LEFT JOIN asistencias a ON a.reunion_id = r.id
          GROUP BY r.id
@@ -568,7 +605,7 @@ pub fn listar_reuniones(st: State<AppState>) -> R<Vec<ReunionFila>> {
     let rows = q.query_map([], |r| {
         Ok(ReunionFila {
             id: r.get(0)?, fecha: r.get(1)?, tipo: r.get(2)?, temas: r.get(3)?,
-            acta: r.get(4)?, asistentes_count: r.get(5)?,
+            acta: r.get(4)?, archivo_adjunto: r.get(5)?, asistentes_count: r.get(6)?,
         })
     }).map_err(s)?;
     let v = rows.collect::<Result<Vec<_>, _>>().map_err(s)?;
@@ -595,10 +632,13 @@ pub fn crear_reunion(st: State<AppState>, datos: DatosReunion) -> R<i64> {
 }
 
 #[tauri::command]
-pub fn guardar_acta(st: State<AppState>, id: i64, acta: String) -> R<()> {
+pub fn guardar_acta(st: State<AppState>, id: i64, acta: String, archivo_adjunto: Option<String>) -> R<()> {
     auth_secretaria_o_admin(&st)?;
     let db = st.db.lock().map_err(s)?;
-    db.execute("UPDATE reuniones SET acta=?1 WHERE id=?2", params![acta.trim(), id]).map_err(s)?;
+    db.execute(
+        "UPDATE reuniones SET acta=?1, archivo_adjunto=?2 WHERE id=?3",
+        params![acta.trim(), archivo_adjunto, id],
+    ).map_err(s)?;
     Ok(())
 }
 
@@ -680,12 +720,26 @@ pub fn aprobar_rendicion(st: State<AppState>, id: i64) -> R<()> {
     Ok(())
 }
 
+pub fn eliminar_rendicion_interno(db: &Connection, id: i64) -> R<()> {
+    let estado: String = db.query_row(
+        "SELECT estado FROM rendiciones WHERE id=?1",
+        params![id],
+        |r| r.get(0),
+    ).map_err(|_| "La rendición de cuentas no existe".to_string())?;
+
+    if estado == "Aprobada" {
+        return Err("No se puede eliminar una rendición de cuentas que ya ha sido aprobada".to_string());
+    }
+
+    db.execute("DELETE FROM rendiciones WHERE id=?1", params![id]).map_err(s)?;
+    Ok(())
+}
+
 #[tauri::command]
 pub fn eliminar_rendicion(st: State<AppState>, id: i64) -> R<()> {
     auth_tesorero_o_admin(&st)?;
     let db = st.db.lock().map_err(s)?;
-    db.execute("DELETE FROM rendiciones WHERE id=?1", params![id]).map_err(s)?;
-    Ok(())
+    eliminar_rendicion_interno(&db, id)
 }
 
 // ----------------------------------------------------
@@ -882,6 +936,57 @@ pub fn listar_copias_seguridad(st: State<AppState>) -> R<Vec<CopiaSeguridadFila>
     }
     copias.sort_by(|a, b| b.nombre_archivo.cmp(&a.nombre_archivo));
     Ok(copias)
+}
+
+/// Sanitiza rutas para evitar vulnerabilidades de Path Traversal
+pub fn sanitizar_nombre_archivo(raw: &str) -> Result<String, String> {
+    let clean = std::path::Path::new(raw)
+        .file_name()
+        .and_then(|n| n.to_str())
+        .ok_or_else(|| "Nombre de archivo inválido".to_string())?;
+
+    if clean.is_empty() || clean.contains("..") || clean.contains('/') || clean.contains('\\') {
+        return Err("Ruta o nombre de archivo inseguro".to_string());
+    }
+    Ok(clean.to_string())
+}
+
+pub fn restaurar_copia_interna(st: &AppState, archivo: &str) -> R<String> {
+    let clean_name = sanitizar_nombre_archivo(archivo)?;
+    if !clean_name.ends_with(".db") {
+        return Err("El archivo de respaldo debe tener extensión .db".to_string());
+    }
+    let copias_dir = st.data_dir.join("copias");
+    let backup_path = copias_dir.join(&clean_name);
+    if !backup_path.exists() {
+        return Err(format!("El archivo de respaldo '{}' no existe en el almacenamiento", clean_name));
+    }
+
+    // Verificar integridad del archivo de respaldo
+    let backup_conn = Connection::open(&backup_path).map_err(s)?;
+    let integrity: String = backup_conn.query_row("PRAGMA integrity_check", [], |r| r.get(0)).map_err(s)?;
+    if integrity != "ok" {
+        return Err(format!("El archivo de respaldo está corrupto: {}", integrity));
+    }
+
+    // Restaurar directamente sobre la base activa usando rusqlite backup
+    let mut db = st.db.lock().map_err(s)?;
+    let backup = rusqlite::backup::Backup::new(&backup_conn, &mut *db).map_err(s)?;
+    backup.run_to_completion(100, std::time::Duration::from_millis(50), None).map_err(s)?;
+    drop(backup);
+
+    let _ = db.execute(
+        "INSERT INTO configuracion(clave, valor) VALUES('ultima_restauracion', datetime('now','localtime')) ON CONFLICT(clave) DO UPDATE SET valor=datetime('now','localtime')",
+        [],
+    );
+
+    Ok(format!("Base de datos restaurada correctamente desde el respaldo: {}", clean_name))
+}
+
+#[tauri::command]
+pub fn restaurar_copia_seguridad(st: State<AppState>, archivo: String) -> R<String> {
+    auth_superadmin(&st)?;
+    restaurar_copia_interna(&st, &archivo)
 }
 
 #[tauri::command]
@@ -1270,7 +1375,7 @@ pub fn eliminar_documento_asamblea(st: State<AppState>, id: i64) -> R<()> {
         .map_err(s)?;
 
     if let Some(filename) = archivo_pdf {
-        if let Some(clean_name) = std::path::Path::new(&filename).file_name() {
+        if let Ok(clean_name) = sanitizar_nombre_archivo(&filename) {
             let pdf_path = st.data_dir.join("documentos").join(clean_name);
             let _ = std::fs::remove_file(pdf_path);
         }
@@ -1283,9 +1388,7 @@ pub fn eliminar_documento_asamblea(st: State<AppState>, id: i64) -> R<()> {
 #[tauri::command]
 pub fn leer_archivo_documento(st: State<AppState>, archivo_pdf: String) -> R<String> {
     auth(&st)?;
-    let clean_name = std::path::Path::new(&archivo_pdf)
-        .file_name()
-        .ok_or_else(|| "Nombre de archivo inválido".to_string())?;
+    let clean_name = sanitizar_nombre_archivo(&archivo_pdf)?;
     let pdf_path = st.data_dir.join("documentos").join(clean_name);
     if !pdf_path.exists() {
         return Err("El archivo PDF no existe en el disco".to_string());

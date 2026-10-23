@@ -41,14 +41,16 @@ El sistema centraliza y profesionaliza la administración escolar eliminando pla
 
 1. **Determinación del Estado Societario**: La vista `v_asociados` calcula dinámicamente si el socio está:
    - `Exento`: Si tiene la bandera de exención explícita activada por secretaría.
-   - `Al día`: Si la diferencia en meses entre la fecha actual y su último período abonado (`MAX(periodo)` en `pagos`) es menor o igual a cero.
+   - `Al día`: Si la diferencia en meses entre la fecha actual y su último período abonado activo (`MAX(periodo)` en `pagos WHERE anulado = 0`) es menor o igual a cero.
    - `Con deuda`: Si adeuda uno o más períodos mensuales transcurridos desde su alta.
-2. **Sincronización Bidireccional Caja ↔ Cobranzas**: Todo cobro de cuota genera un registro en `pagos` y un asiento de `Ingreso` en `movimientos_caja`. Si un movimiento de cuota es anulado en Caja, se desestima transaccionalmente el pago enlazado, revirtiendo al socio a estado de deuda.
-3. **Consistencia de Nómina**: La edición de datos de un socio (DNI, teléfono, email, apellido y nombre) actualiza automáticamente en cascada su fila correspondiente en `comision_directiva` si ocupa un cargo activo.
-4. **Respaldo Dinámico**: Si la versión de datos (`PRAGMA data_version`) no se incrementó desde la última copia y ya existe un archivo físico de respaldo, se omite la creación de un nuevo archivo para preservar el almacenamiento.
-5. **Doble Firma Contable**: Las rendiciones de cuentas creadas por el rol `Tesorero` nacen en estado `Borrador` y sólo pueden consolidarse a `Aprobada` tras la intervención explícita de un usuario con rol `Presidente` o `Superadmin`.
+2. **Sincronización Bidireccional Caja ↔ Cobranzas**: Todo cobro de cuota genera un registro en `pagos` y un asiento de `Ingreso` en `movimientos_caja`.
+3. **Auditoría y Soft-Delete (RNF05)**: Al anular un movimiento en caja, el pago societario vinculado se preserva marcándose como `anulado = 1` en lugar de eliminarse físicamente, revirtiendo al socio a estado de deuda de forma transaccional y registrando obligatoriamente el motivo de la anulación (RF14).
+4. **Protección contra Pagos Duplicados**: El sistema rechaza montos menores o iguales a cero e impide registrar más de un pago activo para un mismo período y asociado mediante validación de negocio e índice único en base de datos.
+5. **Consistencia de Nómina**: La edición de datos de un socio (DNI, teléfono, email, apellido y nombre) actualiza automáticamente en cascada su fila correspondiente en `comision_directiva` si ocupa un cargo activo.
+6. **Protección de Rendiciones Aprobadas**: Las rendiciones de cuentas creadas por el rol `Tesorero` nacen en estado `Borrador` y son aprobadas por `Presidente` o `Superadmin`. Una vez aprobada, el sistema bloquea su eliminación para resguardar la inmutabilidad de los balances consolidados.
+7. **Respaldo Dinámico y Restauración (RF21)**: Si la versión de datos (`PRAGMA data_version`) no se incrementó desde la última copia y ya existe un archivo físico de respaldo, se omite la creación de un nuevo archivo para preservar almacenamiento. El sistema permite restaurar instantáneamente el estado completo de la base de datos a partir de cualquier copia íntegra con verificación de integridad previa.
+8. **Libro de Actas y Adjuntos Digitales (RF16)**: Permite la redacción oficial de actas de asambleas y reuniones de comisión directiva, admitiendo el adjunto de actas escaneadas o documentación respaldatoria en formato PDF o imagen.
 
----
 
 ## 2. Instructivo para la Instalación Local
 
@@ -193,16 +195,18 @@ Se implementaron pruebas automatizadas tanto en el backend utilizando el harness
 
 ### Pruebas Automatizadas de Backend (Rust)
 
-Se cuenta con una suite integral ubicada en `src-tauri/tests/cooperar_tests.rs` que valida:
+El backend implementa una arquitectura desacoplada como crate library (`cooperar`) permitiendo que la suite de pruebas de integración ubicada en `src-tauri/tests/cooperar_tests.rs` importe e invoque directamente las funciones reales de la aplicación (`db::init`, `calcular_cuil_modulo_11`, `actualizar_asociado_interno`, `registrar_pago_interno`, `anular_movimiento_caja_interno`, `ejecutar_copia_interna`, `restaurar_copia_interna`, `eliminar_rendicion_interno`, `sanitizar_nombre_archivo`):
 
-1. **Esquema e Integridad Relacional**: Comprueba la creación de tablas y la aplicación de claves foráneas.
-2. **Verificación de CUIL (Módulo 11)**: Comprobación matemática del dígito verificador oficial de ANSES/AFIP ante diferentes casos de DNI.
-3. **Vinculación Cruzada e Integridad Transaccional**:
+1. **Esquema e Inicialización Real**: Valida la inicialización completa mediante `db::init`, creación de tablas, vista `v_asociados`, integridad referencial y verificación del hashing Argon2 en usuarios iniciales.
+2. **Verificación de CUIL (Módulo 11 Oficial)**: Comprobación matemática del algoritmo oficial de ANSES/AFIP importado directamente de la lógica de la aplicación.
+3. **Validación de Pagos y Prevención de Duplicados**: Rechazo estricto de montos menores o iguales a cero e impedimento de registrar pagos duplicados para el mismo período y asociado.
+4. **Vinculación Cruzada, Sincronización y Soft-Delete (RNF05 / RF14)**:
    - Sincronización automática de datos entre el padrón de asociados y la nómina de la comisión directiva.
-   - Vinculación Caja ↔ Pagos: la anulación de un cobro en caja revierte inmediatamente el estado a "Con deuda".
-4. **Respaldo Dinámico (`PRAGMA data_version`)**: Valida que la copia de seguridad se omita si no hubo cambios en la base de datos.
-5. **Sanitización contra Path Traversal**: Verifica que rutas maliciosas (`../../etc/passwd`) sean depuradas correctamente.
-6. **Balance Financiero de Rendiciones**: Verifica la exclusión exacta de movimientos anulados en los balances.
+   - Vinculación Caja ↔ Pagos: período dinámico independiente de la fecha del año, registro transaccional, anulación con motivo obligatorio (`motivo_anulacion`), preservación del pago mediante soft-delete (`anulado = 1`) y recálculo instantáneo del estado de deuda.
+5. **Protección de Rendiciones Aprobadas**: Valida que una rendición consolidada con estado `Aprobada` rechace cualquier intento de borrado.
+6. **Balance Financiero de Rendiciones**: Verifica la exclusión matemática exacta de movimientos anulados en los balances.
+7. **Respaldo Dinámico y Restauración (RF21)**: Valida la prevención de copias redundantes mediante `PRAGMA data_version` y la restauración íntegra y segura de la base de datos a través de SQLite Backup API.
+8. **Seguridad contra Path Traversal**: Verifica que la función `sanitizar_nombre_archivo` de la aplicación depure y neutralice eficazmente secuencias maliciosas (`../../etc/passwd`, `..\calc.exe`).
 
 ### Ejecución de Pruebas:
 
@@ -219,18 +223,20 @@ npx tsc --noEmit
 npm run build
 ```
 
-**Resultado de la última ejecución oficial (100% Aprobado):**
+**Resultado de la ejecución oficial (100% Aprobado):**
 
 ```
-running 6 tests
-test test_cuil_modulo_11_verification ........................... ok
+running 8 tests
 test test_path_traversal_sanitization ........................... ok
-test test_db_initialization_and_schema .......................... ok
-test test_dynamic_backup_versioning ............................. ok
-test test_rendiciones_balance_calculo ........................... ok
+test test_cuil_modulo_11_verification ........................... ok
+test test_pagos_duplicate_and_amount_validations ................ ok
 test test_cross_data_integrity_asociado_comision_and_caja_pagos . ok
+test test_eliminar_rendicion_protection ......................... ok
+test test_rendiciones_balance_calculo ........................... ok
+test test_dynamic_backup_and_restoration ........................ ok
+test test_db_initialization_and_schema .......................... ok
 
-test result: ok. 6 passed; 0 failed; 0 ignored; finished in 0.04s
+test result: ok. 8 passed; 0 failed; 0 ignored; finished in 1.57s
 ```
 
 ## Licencia

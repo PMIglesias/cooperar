@@ -1,18 +1,11 @@
 // src-tauri/src/main.rs
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-mod commands;
-mod db;
-
+use cooperar::{commands, db, AppState};
 use std::path::PathBuf;
 use std::sync::Mutex;
 use tauri::Manager;
 
-pub struct AppState {
-    pub db: Mutex<rusqlite::Connection>,
-    pub sesion: Mutex<Option<commands::Usuario>>,
-    pub data_dir: PathBuf,
-}
 
 /// Resuelve la carpeta de datos en modo 100% portable:
 /// - En producción (release): utiliza la subcarpeta `datos` situada exactamente junto al ejecutable (.exe).
@@ -101,6 +94,7 @@ fn main() {
             commands::cambiar_estado_usuario,
             commands::crear_copia_seguridad,
             commands::listar_copias_seguridad,
+            commands::restaurar_copia_seguridad,
             commands::obtener_configuracion,
             commands::guardar_configuracion,
             commands::obtener_ruta_datos,

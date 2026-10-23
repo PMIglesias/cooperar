@@ -20,15 +20,16 @@ CREATE TABLE IF NOT EXISTS alumnos(
 CREATE TABLE IF NOT EXISTS movimientos_caja(
   id INTEGER PRIMARY KEY, fecha TEXT NOT NULL, tipo TEXT NOT NULL CHECK(tipo IN ('Ingreso','Egreso')),
   categoria TEXT NOT NULL, descripcion TEXT NOT NULL, monto INTEGER NOT NULL,
-  comprobante TEXT, anulado INTEGER NOT NULL DEFAULT 0);
+  comprobante TEXT, anulado INTEGER NOT NULL DEFAULT 0, motivo_anulacion TEXT);
 CREATE TABLE IF NOT EXISTS pagos(
   id INTEGER PRIMARY KEY, asociado_id INTEGER NOT NULL REFERENCES asociados(id),
   periodo TEXT NOT NULL, fecha_pago TEXT NOT NULL, monto INTEGER NOT NULL, medio TEXT NOT NULL,
-  comprobante TEXT, registrado_por INTEGER NOT NULL REFERENCES usuarios(id),
+  comprobante TEXT, anulado INTEGER NOT NULL DEFAULT 0, registrado_por INTEGER NOT NULL REFERENCES usuarios(id),
   movimiento_id INTEGER REFERENCES movimientos_caja(id));
+CREATE UNIQUE INDEX IF NOT EXISTS idx_pagos_asociado_periodo_activo ON pagos(asociado_id, periodo) WHERE anulado=0;
 CREATE TABLE IF NOT EXISTS reuniones(
   id INTEGER PRIMARY KEY, fecha TEXT NOT NULL, tipo TEXT NOT NULL CHECK(tipo IN ('Comisión','Asamblea')),
-  temas TEXT NOT NULL, acta TEXT);
+  temas TEXT NOT NULL, acta TEXT, archivo_adjunto TEXT);
 CREATE TABLE IF NOT EXISTS asistencias(
   reunion_id INTEGER NOT NULL REFERENCES reuniones(id) ON DELETE CASCADE,
   asociado_id INTEGER NOT NULL REFERENCES asociados(id), PRIMARY KEY(reunion_id, asociado_id));
@@ -85,7 +86,7 @@ SELECT *,
 FROM (
   SELECT a.*,
     (SELECT group_concat(nombre || ' (' || curso || ')', ', ') FROM alumnos WHERE asociado_id = a.id) AS alumnos,
-    COALESCE((SELECT MAX(periodo) FROM pagos WHERE asociado_id = a.id), strftime('%Y-%m', a.fecha_alta, '-1 month')) AS ult
+    COALESCE((SELECT MAX(periodo) FROM pagos WHERE asociado_id = a.id AND anulado = 0), strftime('%Y-%m', a.fecha_alta, '-1 month')) AS ult
   FROM asociados a
 );
 ";
@@ -183,6 +184,11 @@ pub fn init(dir: &Path) -> Result<Connection, Box<dyn std::error::Error>> {
 
     // Migración por si la tabla comision_directiva ya existía sin asociado_id
     let _ = conn.execute("ALTER TABLE comision_directiva ADD COLUMN asociado_id INTEGER REFERENCES asociados(id) ON DELETE SET NULL", []);
+    // Migraciones Etapa 2: Soft delete en pagos, motivo de anulación en caja, adjuntos en reuniones y unicidad de cuotas
+    let _ = conn.execute("ALTER TABLE pagos ADD COLUMN anulado INTEGER NOT NULL DEFAULT 0", []);
+    let _ = conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_pagos_asociado_periodo_activo ON pagos(asociado_id, periodo) WHERE anulado=0", []);
+    let _ = conn.execute("ALTER TABLE movimientos_caja ADD COLUMN motivo_anulacion TEXT", []);
+    let _ = conn.execute("ALTER TABLE reuniones ADD COLUMN archivo_adjunto TEXT", []);
 
     // 7. Dummy data para Comisión Directiva si está vacía
     let n_comision: i64 = conn.query_row("SELECT COUNT(*) FROM comision_directiva", [], |r| r.get(0)).unwrap_or(0);
@@ -270,3 +276,38 @@ pub fn init(dir: &Path) -> Result<Connection, Box<dyn std::error::Error>> {
 
     Ok(conn)
 }
+
+/// Cálculo oficial de CUIL/CUIT estimativo mediante algoritmo Módulo 11 (estándar ANSES/AFIP)
+pub fn calcular_cuil_modulo_11(dni_str: &str) -> Option<String> {
+    let clean: String = dni_str.chars().filter(|c| c.is_ascii_digit()).collect();
+    if clean.len() < 7 || clean.len() > 8 {
+        return None;
+    }
+    let padded = format!("{:0>8}", clean);
+    let factores = [5, 4, 3, 2, 7, 6, 5, 4, 3, 2];
+
+    let calc_dv = |prefijo: &str| -> Option<u32> {
+        let full = format!("{}{}", prefijo, padded);
+        let mut suma = 0;
+        for (i, c) in full.chars().enumerate() {
+            let d = c.to_digit(10)?;
+            suma += d * factores[i];
+        }
+        let resto = suma % 11;
+        if resto == 0 {
+            Some(0)
+        } else if resto == 1 {
+            None
+        } else {
+            Some(11 - resto)
+        }
+    };
+
+    let mut prefijo = "20";
+    let mut dv = calc_dv(prefijo);
+    if dv.is_none() {
+        prefijo = "23";
+        dv = calc_dv(prefijo);
+    }
+    dv.map(|d| format!("{}-{}-{}", prefijo, padded, d))
+}

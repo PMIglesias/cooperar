@@ -8,7 +8,7 @@ import Badge from "../components/ui/Badge";
 import DataTable, { Column } from "../components/ui/DataTable";
 import { Field, SelectField } from "../components/ui/Field";
 import IconButton from "../components/ui/IconButton";
-import { DocumentIcon, EditIcon } from "../components/icons";
+import { DocumentIcon, EditIcon, PaperclipIcon } from "../components/icons";
 import { useApp } from "../context";
 import s from "./Reuniones.module.css";
 
@@ -34,6 +34,8 @@ export default function Reuniones() {
   // Pantalla Acta
   const [reunionActa, setReunionActa] = useState<ReunionFila | null>(null);
   const [textoActa, setTextoActa] = useState("");
+  const [archivoAdjunto, setArchivoAdjunto] = useState<string | null>(null);
+  const [archivoAdjuntoNombre, setArchivoAdjuntoNombre] = useState<string | null>(null);
   const [savingActa, setSavingActa] = useState(false);
   const [errorActa, setErrorActa] = useState<string | null>(null);
 
@@ -93,8 +95,24 @@ export default function Reuniones() {
   const abrirActa = (r: ReunionFila) => {
     setReunionActa(r);
     setTextoActa(r.acta || "");
+    setArchivoAdjunto(r.archivoAdjunto || null);
+    setArchivoAdjuntoNombre(r.archivoAdjunto ? "acta_adjunta_firmada.pdf" : null);
     setErrorActa(null);
     setVista("acta");
+  };
+
+  const handleArchivoActa = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      setArchivoAdjuntoNombre(file.name);
+      const reader = new FileReader();
+      reader.onload = () => {
+        if (typeof reader.result === "string") {
+          setArchivoAdjunto(reader.result);
+        }
+      };
+      reader.readAsDataURL(file);
+    }
   };
 
   const cargarPlantillaActa = () => {
@@ -123,7 +141,7 @@ Presidente                  Secretario/a`;
     setSavingActa(true);
     setErrorActa(null);
     try {
-      await api.guardarActa(reunionActa.id, textoActa);
+      await api.guardarActa(reunionActa.id, textoActa, archivoAdjunto || undefined);
       cargarReuniones();
       setVista("lista");
     } catch (err) {
@@ -162,12 +180,19 @@ Presidente                  Secretario/a`;
     },
     {
       header: "Estado del acta",
-      minWidth: 140,
+      minWidth: 160,
       flex: true,
       render: (r) => (
-        <Badge tone={r.acta ? "ok" : "warn"}>
-          {r.acta ? "Acta redactada" : "Pendiente"}
-        </Badge>
+        <div style={{ display: "flex", gap: "6px", alignItems: "center", flexWrap: "wrap" }}>
+          <Badge tone={r.acta ? "ok" : "warn"}>
+            {r.acta ? "Acta redactada" : "Pendiente"}
+          </Badge>
+          {r.archivoAdjunto && (
+            <span title="Contiene documento o acta escaneada adjunta">
+              <Badge tone="primary">📎 Adjunto</Badge>
+            </span>
+          )}
+        </div>
       ),
     },
     {
@@ -340,6 +365,71 @@ Presidente                  Secretario/a`;
                   : "Acta aún no redactada."
               }
             />
+
+            <div style={{ marginTop: "16px", padding: "12px 16px", background: "var(--color-bg)", borderRadius: "var(--radius-sm)", border: "1px dashed var(--color-border)", display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "12px" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                <PaperclipIcon size={18} />
+                <div>
+                  <strong style={{ fontSize: "var(--fs-sm)", display: "block" }}>Adjunto digital escaneado (RF16 - PDF o Imagen):</strong>
+                  <span style={{ fontSize: "var(--fs-xs)", color: "var(--color-text-muted)" }}>
+                    {archivoAdjunto ? (archivoAdjuntoNombre || "Documento escaneado adjunto") : "Sin archivo escaneado adjunto"}
+                  </span>
+                </div>
+              </div>
+              <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+                {archivoAdjunto && (
+                  <Button
+                    variant="secondary"
+                    onClick={() => {
+                      const w = window.open("");
+                      w?.document.write(`<iframe src="${archivoAdjunto}" style="width:100%; height:100%; border:none;"></iframe>`);
+                    }}
+                  >
+                    Ver archivo
+                  </Button>
+                )}
+                {puedeAdministrar && (
+                  <>
+                    <input
+                      type="file"
+                      id="acta-adjunto-input"
+                      style={{ display: "none" }}
+                      accept=".pdf,image/*"
+                      onChange={handleArchivoActa}
+                    />
+                    <label
+                      htmlFor="acta-adjunto-input"
+                      style={{
+                        display: "inline-flex",
+                        alignItems: "center",
+                        gap: "6px",
+                        padding: "6px 12px",
+                        borderRadius: "6px",
+                        border: "1px solid var(--color-border)",
+                        background: "var(--color-bg-card)",
+                        cursor: "pointer",
+                        fontSize: "var(--fs-sm)",
+                        fontWeight: 500,
+                      }}
+                    >
+                      <PaperclipIcon size={14} />
+                      {archivoAdjunto ? "Reemplazar adjunto" : "Adjuntar PDF o Imagen"}
+                    </label>
+                    {archivoAdjunto && (
+                      <Button
+                        variant="danger"
+                        onClick={() => {
+                          setArchivoAdjunto(null);
+                          setArchivoAdjuntoNombre(null);
+                        }}
+                      >
+                        Quitar
+                      </Button>
+                    )}
+                  </>
+                )}
+              </div>
+            </div>
           </Card>
 
           <div className={s.actionRow}>

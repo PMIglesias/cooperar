@@ -69,6 +69,7 @@ export default function Caja() {
 
   // Confirmación Anulación
   const [movimientoParaAnular, setMovimientoParaAnular] = useState<MovimientoCajaFila | null>(null);
+  const [motivoAnulacion, setMotivoAnulacion] = useState("");
 
   // Modal Ver Detalle Movimiento
   const [movimientoSeleccionado, setMovimientoSeleccionado] = useState<MovimientoCajaFila | null>(null);
@@ -170,8 +171,9 @@ export default function Caja() {
   const confirmarAnularMovimiento = async () => {
     if (!movimientoParaAnular) return;
     try {
-      await api.anularMovimientoCaja(movimientoParaAnular.id);
+      await api.anularMovimientoCaja(movimientoParaAnular.id, motivoAnulacion.trim() || undefined);
       setMovimientoParaAnular(null);
+      setMotivoAnulacion("");
       cargarDatos();
     } catch (err) {
       console.error(err);
@@ -377,6 +379,15 @@ export default function Caja() {
                     </span>
                   </div>
 
+                  {movimientoSeleccionado.anulado === 1 && movimientoSeleccionado.motivoAnulacion && (
+                    <div className={s.detailItem}>
+                      <span className={s.detailLabel}>Motivo de Anulación</span>
+                      <span className={s.detailValue} style={{ color: "var(--color-danger)", fontWeight: 500 }}>
+                        {movimientoSeleccionado.motivoAnulacion}
+                      </span>
+                    </div>
+                  )}
+
                   <div className={s.detailItem}>
                     <span className={s.detailLabel}>Fecha del Movimiento</span>
                     <span className={s.detailValue}>{movimientoSeleccionado.fecha}</span>
@@ -554,18 +565,42 @@ export default function Caja() {
           title="Anular movimiento de caja"
           message={
             movimientoParaAnular ? (
-              <>
-                ¿Está seguro de que desea anular el movimiento{" "}
-                <strong>"{movimientoParaAnular.descripcion}"</strong> por un monto de{" "}
-                <strong>{money(movimientoParaAnular.monto)}</strong>?
-              </>
+              <div>
+                <p style={{ margin: 0 }}>
+                  ¿Está seguro de que desea anular el movimiento{" "}
+                  <strong>"{movimientoParaAnular.descripcion}"</strong> por un monto de{" "}
+                  <strong>{money(movimientoParaAnular.monto)}</strong>?
+                </p>
+                <div style={{ marginTop: "16px" }}>
+                  <label style={{ display: "block", fontSize: "0.85rem", fontWeight: 600, marginBottom: "6px" }}>
+                    Motivo de anulación (RF14):
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="Ej: Registro duplicado / Error en comprobante..."
+                    value={motivoAnulacion}
+                    onChange={(e) => setMotivoAnulacion(e.target.value)}
+                    style={{
+                      width: "100%",
+                      padding: "8px 12px",
+                      borderRadius: "6px",
+                      border: "1px solid var(--color-border)",
+                      background: "var(--color-bg-card)",
+                      color: "inherit",
+                    }}
+                  />
+                </div>
+              </div>
             ) : null
           }
           confirmLabel="Anular movimiento"
           cancelLabel="Cancelar"
           variant="danger"
           onConfirm={confirmarAnularMovimiento}
-          onCancel={() => setMovimientoParaAnular(null)}
+          onCancel={() => {
+            setMovimientoParaAnular(null);
+            setMotivoAnulacion("");
+          }}
         />
       </Layout>
     );
