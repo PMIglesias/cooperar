@@ -207,6 +207,7 @@ El backend implementa una arquitectura desacoplada como crate library (`cooperar
 6. **Balance Financiero de Rendiciones**: Verifica la exclusión matemática exacta de movimientos anulados en los balances.
 7. **Respaldo Dinámico y Restauración (RF21)**: Valida la prevención de copias redundantes mediante `PRAGMA data_version` y la restauración íntegra y segura de la base de datos a través de SQLite Backup API.
 8. **Seguridad contra Path Traversal**: Verifica que la función `sanitizar_nombre_archivo` de la aplicación depure y neutralice eficazmente secuencias maliciosas (`../../etc/passwd`, `..\calc.exe`).
+9. **Migración Preventiva y Compatibilidad Hacia Atrás**: Valida la capacidad de inicializar la app sobre bases de datos preexistentes generadas en versiones anteriores, aplicando automáticamente las migraciones antes de procesar las vistas e índices.
 
 ### Ejecución de Pruebas:
 
@@ -226,17 +227,18 @@ npm run build
 **Resultado de la ejecución oficial (100% Aprobado):**
 
 ```
-running 8 tests
+running 9 tests
 test test_path_traversal_sanitization ........................... ok
 test test_cuil_modulo_11_verification ........................... ok
 test test_pagos_duplicate_and_amount_validations ................ ok
 test test_cross_data_integrity_asociado_comision_and_caja_pagos . ok
+test test_db_migration_from_legacy_schema ....................... ok
 test test_eliminar_rendicion_protection ......................... ok
 test test_rendiciones_balance_calculo ........................... ok
 test test_dynamic_backup_and_restoration ........................ ok
 test test_db_initialization_and_schema .......................... ok
 
-test result: ok. 8 passed; 0 failed; 0 ignored; finished in 1.57s
+test result: ok. 9 passed; 0 failed; 0 ignored; finished in 1.66s
 ```
 
 ## Licencia

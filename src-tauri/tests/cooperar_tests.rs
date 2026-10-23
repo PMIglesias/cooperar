@@ -373,3 +373,33 @@ fn test_rendiciones_balance_calculo() {
 
     let _ = fs::remove_dir_all(&test_dir);
 }
+
+#[test]
+fn test_db_migration_from_legacy_schema() {
+    let test_dir = PathBuf::from("target").join("test_legacy_migration");
+    let _ = fs::remove_dir_all(&test_dir);
+    fs::create_dir_all(&test_dir).expect("Crear dir de test");
+
+    // Crear base de datos simulando el esquema de versiones anteriores (sin columna anulado en pagos, etc.)
+    {
+        let legacy_conn = rusqlite::Connection::open(test_dir.join("cooperar.db")).unwrap();
+        legacy_conn.execute_batch("
+            CREATE TABLE usuarios(id INTEGER PRIMARY KEY, nombre TEXT NOT NULL, dni TEXT UNIQUE, email TEXT UNIQUE, rol TEXT NOT NULL, clave_hash TEXT NOT NULL, activo INTEGER NOT NULL DEFAULT 1);
+            CREATE TABLE asociados(id INTEGER PRIMARY KEY, apellido_nombre TEXT NOT NULL, dni TEXT NOT NULL UNIQUE, telefono TEXT, email TEXT, fecha_alta TEXT NOT NULL DEFAULT (date('now','localtime')), exento INTEGER NOT NULL DEFAULT 0, activo INTEGER NOT NULL DEFAULT 1);
+            CREATE TABLE pagos(id INTEGER PRIMARY KEY, asociado_id INTEGER NOT NULL, periodo TEXT NOT NULL, fecha_pago TEXT NOT NULL, monto INTEGER NOT NULL, medio TEXT NOT NULL, comprobante TEXT, registrado_por INTEGER NOT NULL, movimiento_id INTEGER);
+            CREATE TABLE movimientos_caja(id INTEGER PRIMARY KEY, fecha TEXT NOT NULL, tipo TEXT NOT NULL, categoria TEXT NOT NULL, descripcion TEXT NOT NULL, monto INTEGER NOT NULL, comprobante TEXT, anulado INTEGER NOT NULL DEFAULT 0);
+            CREATE TABLE reuniones(id INTEGER PRIMARY KEY, fecha TEXT NOT NULL, tipo TEXT NOT NULL, temas TEXT NOT NULL, acta TEXT);
+        ").unwrap();
+    }
+
+    // Ahora invocar db::init sobre esa base de datos existente:
+    // Debe aplicar las migraciones preventivas, crear vistas e índices sin fallar
+    let conn = db::init(&test_dir).expect("db::init debe migrar automáticamente una base preexistente");
+
+    // Verificar que la columna anulado existe y el índice parcial está activo
+    let count: i64 = conn.query_row("SELECT COUNT(*) FROM pagos WHERE anulado=0", [], |r| r.get(0)).unwrap();
+    assert_eq!(count, 6);
+
+    let _ = fs::remove_dir_all(&test_dir);
+}
+

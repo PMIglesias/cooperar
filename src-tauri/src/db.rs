@@ -26,7 +26,6 @@ CREATE TABLE IF NOT EXISTS pagos(
   periodo TEXT NOT NULL, fecha_pago TEXT NOT NULL, monto INTEGER NOT NULL, medio TEXT NOT NULL,
   comprobante TEXT, anulado INTEGER NOT NULL DEFAULT 0, registrado_por INTEGER NOT NULL REFERENCES usuarios(id),
   movimiento_id INTEGER REFERENCES movimientos_caja(id));
-CREATE UNIQUE INDEX IF NOT EXISTS idx_pagos_asociado_periodo_activo ON pagos(asociado_id, periodo) WHERE anulado=0;
 CREATE TABLE IF NOT EXISTS reuniones(
   id INTEGER PRIMARY KEY, fecha TEXT NOT NULL, tipo TEXT NOT NULL CHECK(tipo IN ('Comisión','Asamblea')),
   temas TEXT NOT NULL, acta TEXT, archivo_adjunto TEXT);
@@ -106,7 +105,17 @@ pub fn init(dir: &Path) -> Result<Connection, Box<dyn std::error::Error>> {
     std::fs::create_dir_all(dir)?;
     let conn = Connection::open(dir.join("cooperar.db"))?;
     conn.execute_batch("PRAGMA foreign_keys = ON;")?;
+
+    // Migraciones preventivas para bases de datos existentes antes de aplicar SCHEMA (vistas e índices dependientes)
+    let _ = conn.execute("ALTER TABLE pagos ADD COLUMN anulado INTEGER NOT NULL DEFAULT 0", []);
+    let _ = conn.execute("ALTER TABLE movimientos_caja ADD COLUMN motivo_anulacion TEXT", []);
+    let _ = conn.execute("ALTER TABLE reuniones ADD COLUMN archivo_adjunto TEXT", []);
+    let _ = conn.execute("ALTER TABLE comision_directiva ADD COLUMN asociado_id INTEGER REFERENCES asociados(id) ON DELETE SET NULL", []);
+    let _ = conn.execute("UPDATE pagos SET anulado = 0 WHERE anulado IS NULL", []);
+
     conn.execute_batch(SCHEMA)?;
+    let _ = conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_pagos_asociado_periodo_activo ON pagos(asociado_id, periodo) WHERE anulado=0", []);
+
     let n: i64 = conn.query_row("SELECT COUNT(*) FROM usuarios", [], |r| r.get(0))?;
     if n == 0 {
         let clave_hash = hash("admin123");
@@ -181,14 +190,6 @@ pub fn init(dir: &Path) -> Result<Connection, Box<dyn std::error::Error>> {
             [],
         )?;
     }
-
-    // Migración por si la tabla comision_directiva ya existía sin asociado_id
-    let _ = conn.execute("ALTER TABLE comision_directiva ADD COLUMN asociado_id INTEGER REFERENCES asociados(id) ON DELETE SET NULL", []);
-    // Migraciones Etapa 2: Soft delete en pagos, motivo de anulación en caja, adjuntos en reuniones y unicidad de cuotas
-    let _ = conn.execute("ALTER TABLE pagos ADD COLUMN anulado INTEGER NOT NULL DEFAULT 0", []);
-    let _ = conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_pagos_asociado_periodo_activo ON pagos(asociado_id, periodo) WHERE anulado=0", []);
-    let _ = conn.execute("ALTER TABLE movimientos_caja ADD COLUMN motivo_anulacion TEXT", []);
-    let _ = conn.execute("ALTER TABLE reuniones ADD COLUMN archivo_adjunto TEXT", []);
 
     // 7. Dummy data para Comisión Directiva si está vacía
     let n_comision: i64 = conn.query_row("SELECT COUNT(*) FROM comision_directiva", [], |r| r.get(0)).unwrap_or(0);
