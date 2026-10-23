@@ -180,45 +180,59 @@ export default function Rendiciones() {
     },
     {
       header: "Acciones",
-      width: 120,
+      width: 130,
       align: "center",
       render: (r) => (
-        <div style={{ display: "flex", gap: "6px", alignItems: "center" }}>
-          <IconButton
-            icon={<DocumentIcon />}
-            title="Ver balance de rendición"
-            variant="primary"
-            square
-            onClick={(e) => {
-              e.stopPropagation();
-              setRendicionSeleccionada(r);
-              setVista("detalle");
-            }}
-          />
-          {puedeAprobar && r.estado === "Borrador" && (
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(3, 32px)",
+            gap: "6px",
+            alignItems: "center",
+            justifyContent: "center",
+          }}
+        >
+          <div style={{ width: 32, height: 32, display: "flex", alignItems: "center", justifyContent: "center" }}>
             <IconButton
-              icon={<CheckIcon />}
-              title="Aprobar rendición formalmente"
-              variant="success"
+              icon={<DocumentIcon />}
+              title="Ver balance de rendición"
+              variant="primary"
               square
               onClick={(e) => {
                 e.stopPropagation();
-                aprobarRendicion(r.id);
+                setRendicionSeleccionada(r);
+                setVista("detalle");
               }}
             />
-          )}
-          {puedeCrear && (
-            <IconButton
-              icon={<TrashIcon />}
-              title="Eliminar rendición"
-              variant="danger"
-              square
-              onClick={(e) => {
-                e.stopPropagation();
-                setRendicionParaEliminar({ id: r.id, periodo: r.periodo });
-              }}
-            />
-          )}
+          </div>
+          <div style={{ width: 32, height: 32, display: "flex", alignItems: "center", justifyContent: "center" }}>
+            {puedeAprobar && r.estado === "Borrador" && (
+              <IconButton
+                icon={<CheckIcon />}
+                title="Aprobar rendición formalmente"
+                variant="success"
+                square
+                onClick={(e) => {
+                  e.stopPropagation();
+                  aprobarRendicion(r.id);
+                }}
+              />
+            )}
+          </div>
+          <div style={{ width: 32, height: 32, display: "flex", alignItems: "center", justifyContent: "center" }}>
+            {puedeCrear && r.estado === "Borrador" && (
+              <IconButton
+                icon={<TrashIcon />}
+                title="Eliminar rendición"
+                variant="danger"
+                square
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setRendicionParaEliminar({ id: r.id, periodo: r.periodo });
+                }}
+              />
+            )}
+          </div>
         </div>
       ),
     },
@@ -453,7 +467,7 @@ export default function Rendiciones() {
                 {aprobando ? "Aprobando..." : "✓ Aprobar rendición formalmente"}
               </Button>
             )}
-            {puedeCrear && (
+            {puedeCrear && rendicionSeleccionada.estado === "Borrador" && (
               <Button
                 variant="danger"
                 onClick={() =>
