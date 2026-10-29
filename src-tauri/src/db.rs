@@ -20,7 +20,8 @@ CREATE TABLE IF NOT EXISTS alumnos(
 CREATE TABLE IF NOT EXISTS movimientos_caja(
   id INTEGER PRIMARY KEY, fecha TEXT NOT NULL, tipo TEXT NOT NULL CHECK(tipo IN ('Ingreso','Egreso')),
   categoria TEXT NOT NULL, descripcion TEXT NOT NULL, monto INTEGER NOT NULL,
-  comprobante TEXT, anulado INTEGER NOT NULL DEFAULT 0, motivo_anulacion TEXT);
+  comprobante TEXT, anulado INTEGER NOT NULL DEFAULT 0, motivo_anulacion TEXT,
+  adjunto_nombre TEXT, adjunto_datos TEXT, registrado_por INTEGER REFERENCES usuarios(id));
 CREATE TABLE IF NOT EXISTS pagos(
   id INTEGER PRIMARY KEY, asociado_id INTEGER NOT NULL REFERENCES asociados(id),
   periodo TEXT NOT NULL, fecha_pago TEXT NOT NULL, monto INTEGER NOT NULL, medio TEXT NOT NULL,
@@ -28,7 +29,7 @@ CREATE TABLE IF NOT EXISTS pagos(
   movimiento_id INTEGER REFERENCES movimientos_caja(id));
 CREATE TABLE IF NOT EXISTS reuniones(
   id INTEGER PRIMARY KEY, fecha TEXT NOT NULL, tipo TEXT NOT NULL CHECK(tipo IN ('Comisión','Asamblea')),
-  temas TEXT NOT NULL, acta TEXT, archivo_adjunto TEXT);
+  temas TEXT NOT NULL, acta TEXT, archivo_adjunto TEXT, registrado_por INTEGER REFERENCES usuarios(id));
 CREATE TABLE IF NOT EXISTS asistencias(
   reunion_id INTEGER NOT NULL REFERENCES reuniones(id) ON DELETE CASCADE,
   asociado_id INTEGER NOT NULL REFERENCES asociados(id), PRIMARY KEY(reunion_id, asociado_id));
@@ -110,6 +111,10 @@ pub fn init(dir: &Path) -> Result<Connection, Box<dyn std::error::Error>> {
     let _ = conn.execute("ALTER TABLE pagos ADD COLUMN anulado INTEGER NOT NULL DEFAULT 0", []);
     let _ = conn.execute("ALTER TABLE movimientos_caja ADD COLUMN motivo_anulacion TEXT", []);
     let _ = conn.execute("ALTER TABLE reuniones ADD COLUMN archivo_adjunto TEXT", []);
+    let _ = conn.execute("ALTER TABLE movimientos_caja ADD COLUMN adjunto_nombre TEXT", []);
+    let _ = conn.execute("ALTER TABLE movimientos_caja ADD COLUMN adjunto_datos TEXT", []);
+    let _ = conn.execute("ALTER TABLE movimientos_caja ADD COLUMN registrado_por INTEGER REFERENCES usuarios(id)", []);
+    let _ = conn.execute("ALTER TABLE reuniones ADD COLUMN registrado_por INTEGER REFERENCES usuarios(id)", []);
     let _ = conn.execute("ALTER TABLE comision_directiva ADD COLUMN asociado_id INTEGER REFERENCES asociados(id) ON DELETE SET NULL", []);
     let _ = conn.execute("UPDATE pagos SET anulado = 0 WHERE anulado IS NULL", []);
 
@@ -159,14 +164,32 @@ pub fn init(dir: &Path) -> Result<Connection, Box<dyn std::error::Error>> {
             [],
         )?;
 
-        // 4. Movimientos de caja genéricos
+        // 4. Movimientos de caja genéricos (categorías iguales a las de la pantalla de Caja)
         conn.execute(
             "INSERT INTO movimientos_caja(fecha, tipo, categoria, descripcion, monto) VALUES
              (date('now', '-10 days'), 'Ingreso', 'Cuotas', 'Cobro cuotas societarias mes anterior', 56000),
-             (date('now', '-8 days'), 'Egreso', 'Insumos', 'Compra de artículos de limpieza y desinfección', 25400),
-             (date('now', '-5 days'), 'Ingreso', 'Eventos', 'Recaudación kermesse familiar escolar', 185000),
-             (date('now', '-3 days'), 'Egreso', 'Mantenimiento', 'Reparación luminarias patio y pasillos', 45000),
+             (date('now', '-8 days'), 'Egreso', 'Artículos de Limpieza', 'Compra de artículos de limpieza y desinfección', 25400),
+             (date('now', '-5 days'), 'Ingreso', 'Eventos y Festivales', 'Recaudación kermesse familiar escolar', 185000),
+             (date('now', '-3 days'), 'Egreso', 'Mantenimiento y Reparaciones', 'Reparación luminarias patio y pasillos', 45000),
              (date('now', '-1 day'), 'Ingreso', 'Cuotas', 'Cobro cuotas mes en curso', 48000)",
+            [],
+        )?;
+
+        // 4.b Movimientos del 3° trimestre 2026 (período que propone por defecto la nueva rendición)
+        // Ingresos $241.000 - Egresos $70.400 = Saldo $170.600
+        conn.execute(
+            "INSERT INTO movimientos_caja(fecha, tipo, categoria, descripcion, monto, comprobante) VALUES
+             ('2026-07-10', 'Ingreso', 'Cuotas', 'Cobro cuotas societarias julio', 64000, 'LOT-097'),
+             ('2026-07-09', 'Ingreso', 'Eventos y Festivales', 'Buffet acto Día de la Independencia', 36000, 'ACT-009'),
+             ('2026-07-18', 'Egreso', 'Mantenimiento y Reparaciones', 'Reparación de canilla y desagüe baño planta baja', 22000, 'FAC-7712'),
+             ('2026-07-22', 'Egreso', 'Artículos de Limpieza', 'Compra de lavandina, detergente y trapos', 7000, 'FAC-1088'),
+             ('2026-08-08', 'Ingreso', 'Cuotas', 'Cobro cuotas societarias agosto', 61000, 'LOT-098'),
+             ('2026-08-14', 'Ingreso', 'Donaciones', 'Donación familia Álvarez para biblioteca', 12000, 'REC-D-014'),
+             ('2026-08-20', 'Egreso', 'Material Didáctico y Librería', 'Afiches, cartulinas y fibrones para el Día del Niño', 19400, 'FAC-3321'),
+             ('2026-09-09', 'Ingreso', 'Cuotas', 'Cobro cuotas societarias septiembre', 60000, 'LOT-099'),
+             ('2026-09-15', 'Ingreso', 'Donaciones', 'Donación comercio del barrio', 8000, 'REC-D-015'),
+             ('2026-09-17', 'Egreso', 'Mantenimiento y Reparaciones', 'Pintura de aula de 3° A', 16500, 'FAC-7790'),
+             ('2026-09-25', 'Egreso', 'Artículos de Limpieza', 'Reposición de bolsas y desinfectante', 5500, 'FAC-1131')",
             [],
         )?;
 
@@ -189,6 +212,10 @@ pub fn init(dir: &Path) -> Result<Connection, Box<dyn std::error::Error>> {
              (date('now', '-20 days'), 'Asamblea', 'Aprobación de memoria y balance anual. Renovación de autoridades.', 'Acta N° 48 aprobada por unanimidad de socios presentes.')",
             [],
         )?;
+
+        // 6.b Autoría de los datos de demostración: la caja la carga Tesorería y las reuniones Secretaría
+        conn.execute("UPDATE movimientos_caja SET registrado_por=(SELECT id FROM usuarios WHERE rol='Tesorero') WHERE registrado_por IS NULL", [])?;
+        conn.execute("UPDATE reuniones SET registrado_por=(SELECT id FROM usuarios WHERE rol='Secretaria') WHERE registrado_por IS NULL", [])?;
     }
 
     // 7. Dummy data para Comisión Directiva si está vacía

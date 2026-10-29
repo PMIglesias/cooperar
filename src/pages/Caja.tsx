@@ -108,6 +108,11 @@ export default function Caja() {
   const handleArchivoSeleccionado = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
+      if (file.size > 10 * 1024 * 1024) {
+        setError("El comprobante adjunto supera el límite de 10 MB.");
+        e.target.value = "";
+        return;
+      }
       setArchivoAdjunto(file.name);
       if (!comprobante.trim()) {
         const nombreSinExt = file.name.substring(0, file.name.lastIndexOf(".")) || file.name;
@@ -139,25 +144,16 @@ export default function Caja() {
     setError(null);
     try {
       const compFinal = comprobante.trim() || (archivoAdjunto ? archivoAdjunto : undefined);
-      const nuevoId = await api.crearMovimientoCaja({
+      await api.crearMovimientoCaja({
         tipo,
         categoria,
         descripcion: descripcion.trim(),
         monto: montoNum,
         comprobante: compFinal,
+        // El archivo se guarda en la base de datos para que quede incluido en las copias de seguridad
+        adjuntoNombre: archivoBase64 ? archivoAdjunto || "comprobante" : undefined,
+        adjuntoDatos: archivoBase64 || undefined,
       });
-
-      // Si se adjuntó un archivo en base64, guardarlo en el almacenamiento local indexado por el ID del movimiento
-      if (archivoBase64) {
-        try {
-          localStorage.setItem(`comprobante_mov_${nuevoId}`, JSON.stringify({
-            nombre: archivoAdjunto || "comprobante",
-            dataUrl: archivoBase64,
-          }));
-        } catch (e) {
-          console.warn("No se pudo almacenar comprobante en localStorage:", e);
-        }
-      }
 
       cargarDatos();
       setVista("lista");
@@ -165,6 +161,15 @@ export default function Caja() {
       setError(String(err));
     } finally {
       setSaving(false);
+    }
+  };
+
+  const abrirAdjunto = async (id: number) => {
+    try {
+      const adjunto = await api.obtenerAdjuntoMovimiento(id);
+      if (adjunto) setVisorArchivo(adjunto);
+    } catch (err) {
+      console.error(err);
     }
   };
 
@@ -394,6 +399,11 @@ export default function Caja() {
                   </div>
 
                   <div className={s.detailItem}>
+                    <span className={s.detailLabel}>Registrado por</span>
+                    <span className={s.detailValue}>{movimientoSeleccionado.registradoPor || "—"}</span>
+                  </div>
+
+                  <div className={s.detailItem}>
                     <span className={s.detailLabel}>Monto Operado</span>
                     <span
                       className={s.detailValue}
@@ -426,27 +436,16 @@ export default function Caja() {
                       ) : (
                         <span style={{ color: "var(--color-text-hint)" }}>Sin comprobante asociado</span>
                       )}
-                      {(() => {
-                        const adjuntoStorage = localStorage.getItem(`comprobante_mov_${movimientoSeleccionado.id}`);
-                        if (adjuntoStorage) {
-                          try {
-                            const parsed = JSON.parse(adjuntoStorage);
-                            return (
-                              <button
-                                type="button"
-                                className={s.viewAttachBtn}
-                                onClick={() => setVisorArchivo(parsed)}
-                                title="Ver comprobante adjunto"
-                              >
-                                <PaperclipIcon size={14} />
-                              </button>
-                            );
-                          } catch {
-                            return null;
-                          }
-                        }
-                        return null;
-                      })()}
+                      {movimientoSeleccionado.adjuntoNombre && (
+                        <button
+                          type="button"
+                          className={s.viewAttachBtn}
+                          onClick={() => abrirAdjunto(movimientoSeleccionado.id)}
+                          title="Ver comprobante adjunto"
+                        >
+                          <PaperclipIcon size={14} />
+                        </button>
+                      )}
                     </div>
                   </div>
                 </div>

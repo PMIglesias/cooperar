@@ -16,7 +16,7 @@ const TIPOS_REUNION = ["Comisión", "Asamblea"];
 
 export default function Reuniones() {
   const { usuario } = useApp();
-  const puedeAdministrar = usuario.rol === "Secretaria" || usuario.rol === "Superadmin";
+  const puedeAdministrar = usuario.rol === "Secretaria" || usuario.rol === "Presidente" || usuario.rol === "Superadmin";
   const [vista, setVista] = useState<"lista" | "nuevo" | "acta">("lista");
 
   const [reuniones, setReuniones] = useState<ReunionFila[]>([]);

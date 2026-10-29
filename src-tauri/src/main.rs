@@ -3,7 +3,6 @@
 
 use cooperar::{commands, db, AppState};
 use std::path::PathBuf;
-use std::sync::Mutex;
 use tauri::Manager;
 
 
@@ -37,11 +36,7 @@ fn main() {
         .setup(|app| {
             let dir = resolve_portable_dir(app);
             let conn = db::init(&dir)?;
-            app.manage(AppState {
-                db: Mutex::new(conn),
-                sesion: Mutex::new(None),
-                data_dir: dir,
-            });
+            app.manage(AppState::new(conn, dir));
 
             // Respaldo automático periódico cada 30 minutos (1800 segundos)
             let app_handle = app.handle().clone();
@@ -80,11 +75,13 @@ fn main() {
             commands::listar_movimientos_caja,
             commands::resumen_caja,
             commands::crear_movimiento_caja,
+            commands::obtener_adjunto_movimiento,
             commands::anular_movimiento_caja,
             commands::listar_reuniones,
             commands::crear_reunion,
             commands::guardar_acta,
             commands::listar_rendiciones,
+            commands::detalle_rendicion,
             commands::crear_rendicion,
             commands::aprobar_rendicion,
             commands::eliminar_rendicion,
