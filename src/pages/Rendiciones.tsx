@@ -1,6 +1,6 @@
 // src/pages/Rendiciones.tsx
 import { useEffect, useState, FormEvent } from "react";
-import { api, RendicionFila, money } from "../api";
+import { api, RendicionFila, LineaRendicion, money } from "../api";
 import Layout from "../components/Layout";
 import Button from "../components/ui/Button";
 import Card from "../components/ui/Card";
@@ -33,6 +33,7 @@ export default function Rendiciones() {
 
   // Pantalla Detalle / Planilla
   const [rendicionSeleccionada, setRendicionSeleccionada] = useState<RendicionFila | null>(null);
+  const [detalle, setDetalle] = useState<LineaRendicion[]>([]);
   const [aprobando, setAprobando] = useState(false);
   const [rendicionParaEliminar, setRendicionParaEliminar] = useState<{ id: number; periodo: string } | null>(null);
 
@@ -47,6 +48,17 @@ export default function Rendiciones() {
   useEffect(() => {
     cargarRendiciones();
   }, []);
+
+  // Detalle por categoría de la planilla: sale de los mismos movimientos que los totales
+  const idSeleccionada = rendicionSeleccionada?.id;
+  useEffect(() => {
+    setDetalle([]);
+    if (idSeleccionada === undefined) return;
+    api.detalleRendicion(idSeleccionada).then(setDetalle).catch(console.error);
+  }, [idSeleccionada]);
+
+  const lineasIngreso = detalle.filter((l) => l.tipo === "Ingreso");
+  const lineasEgreso = detalle.filter((l) => l.tipo === "Egreso");
 
   const abrirNuevaRendicion = () => {
     setPeriodo("3° Trimestre 2026");
@@ -396,18 +408,17 @@ export default function Rendiciones() {
               <div className={`${s.sheetColTitle} ${s.sheetColIngresos}`}>I. INGRESOS</div>
               <table className={s.sheetTable}>
                 <tbody>
-                  <tr>
-                    <td>Cuotas sociales ordinarias</td>
-                    <td style={{ textAlign: "right", fontWeight: 600 }}>$ 185.000</td>
-                  </tr>
-                  <tr>
-                    <td>Donaciones voluntarias</td>
-                    <td style={{ textAlign: "right", fontWeight: 600 }}>$ 20.000</td>
-                  </tr>
-                  <tr>
-                    <td>Eventos y buffet escolar</td>
-                    <td style={{ textAlign: "right", fontWeight: 600 }}>$ 36.000</td>
-                  </tr>
+                  {lineasIngreso.length === 0 && (
+                    <tr>
+                      <td colSpan={2} style={{ color: "var(--color-text-hint)" }}>Sin ingresos en el período</td>
+                    </tr>
+                  )}
+                  {lineasIngreso.map((l) => (
+                    <tr key={l.categoria}>
+                      <td>{l.categoria}</td>
+                      <td style={{ textAlign: "right", fontWeight: 600 }}>{money(l.total)}</td>
+                    </tr>
+                  ))}
                   <tr style={{ borderTop: "2px solid var(--color-ok)" }}>
                     <td><strong>TOTAL INGRESOS</strong></td>
                     <td style={{ textAlign: "right", fontWeight: 700, color: "var(--color-ok)" }}>
@@ -422,18 +433,17 @@ export default function Rendiciones() {
               <div className={`${s.sheetColTitle} ${s.sheetColEgresos}`}>II. EGRESOS</div>
               <table className={s.sheetTable}>
                 <tbody>
-                  <tr>
-                    <td>Mantenimiento de aulas</td>
-                    <td style={{ textAlign: "right", fontWeight: 600 }}>$ 38.500</td>
-                  </tr>
-                  <tr>
-                    <td>Material didáctico y librería</td>
-                    <td style={{ textAlign: "right", fontWeight: 600 }}>$ 19.400</td>
-                  </tr>
-                  <tr>
-                    <td>Artículos de limpieza</td>
-                    <td style={{ textAlign: "right", fontWeight: 600 }}>$ 12.500</td>
-                  </tr>
+                  {lineasEgreso.length === 0 && (
+                    <tr>
+                      <td colSpan={2} style={{ color: "var(--color-text-hint)" }}>Sin egresos en el período</td>
+                    </tr>
+                  )}
+                  {lineasEgreso.map((l) => (
+                    <tr key={l.categoria}>
+                      <td>{l.categoria}</td>
+                      <td style={{ textAlign: "right", fontWeight: 600 }}>{money(l.total)}</td>
+                    </tr>
+                  ))}
                   <tr style={{ borderTop: "2px solid var(--color-danger)" }}>
                     <td><strong>TOTAL EGRESOS</strong></td>
                     <td style={{ textAlign: "right", fontWeight: 700, color: "var(--color-danger)" }}>

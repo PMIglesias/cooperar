@@ -86,6 +86,8 @@ export interface MovimientoCajaFila {
   comprobante: string | null;
   anulado: number;
   motivoAnulacion?: string | null;
+  adjuntoNombre?: string | null;
+  registradoPor?: string | null;
 }
 
 export interface DatosMovimientoCaja {
@@ -94,6 +96,13 @@ export interface DatosMovimientoCaja {
   descripcion: string;
   monto: number;
   comprobante?: string;
+  adjuntoNombre?: string;
+  adjuntoDatos?: string;
+}
+
+export interface AdjuntoMovimiento {
+  nombre: string;
+  dataUrl: string;
 }
 
 export interface ResumenCaja {
@@ -134,6 +143,12 @@ export interface RendicionFila {
   totalIngresos: number;
   totalEgresos: number;
   saldoPeriodo: number;
+}
+
+export interface LineaRendicion {
+  tipo: "Ingreso" | "Egreso";
+  categoria: string;
+  total: number;
 }
 
 export interface DatosRendicion {
@@ -300,6 +315,8 @@ let mockPagos: PagoFila[] = [
   { id: 5, asociadoId: 7, apellidoNombre: "Romero, Pablo", dni: "30111444", periodo: "2026-10", fechaPago: "2026-10-06", monto: 8000, medio: "Efectivo", comprobante: "REC-003", registradoPor: "Tesorero (Roberto Fernández)", registradoPorRol: "Tesorero", registradoPorNombre: "Roberto Fernández" },
   { id: 6, asociadoId: 8, apellidoNombre: "Sánchez, Elena", dni: "27999111", periodo: "2026-10", fechaPago: "2026-10-07", monto: 8000, medio: "Transferencia", comprobante: "TRF-1045", registradoPor: "Tesorero (Roberto Fernández)", registradoPorRol: "Tesorero", registradoPorNombre: "Roberto Fernández" },
 ];
+
+const mockAdjuntos: Record<number, AdjuntoMovimiento> = {};
 
 let mockMovimientos: MovimientoCajaFila[] = [
   { id: 5, fecha: "2026-10-06", tipo: "Ingreso", categoria: "Cuotas", descripcion: "Cobro cuotas mes en curso", monto: 48000, comprobante: "LOT-102", anulado: 0 },
@@ -557,8 +574,14 @@ export const api = {
       monto: datos.monto,
       comprobante: datos.comprobante || null,
       anulado: 0,
+      adjuntoNombre: datos.adjuntoNombre || null,
     });
+    if (datos.adjuntoDatos) mockAdjuntos[id] = { nombre: datos.adjuntoNombre || "comprobante", dataUrl: datos.adjuntoDatos };
     return id;
+  },
+  obtenerAdjuntoMovimiento: async (id: number): Promise<AdjuntoMovimiento | null> => {
+    if (isTauri) return invoke<AdjuntoMovimiento | null>("obtener_adjunto_movimiento", { id });
+    return mockAdjuntos[id] || null;
   },
   anularMovimientoCaja: async (id: number, motivo?: string): Promise<void> => {
     if (isTauri) return invoke<void>("anular_movimiento_caja", { id, motivo: motivo || null });
@@ -628,6 +651,17 @@ export const api = {
       r.aprobadaPor = "Presidente";
       r.aprobadaEn = new Date().toLocaleString("es-AR");
     }
+  },
+  detalleRendicion: async (id: number): Promise<LineaRendicion[]> => {
+    if (isTauri) return invoke<LineaRendicion[]>("detalle_rendicion", { id });
+    return [
+      { tipo: "Ingreso", categoria: "Cuotas", total: 185000 },
+      { tipo: "Ingreso", categoria: "Eventos y Festivales", total: 36000 },
+      { tipo: "Ingreso", categoria: "Donaciones", total: 20000 },
+      { tipo: "Egreso", categoria: "Mantenimiento y Reparaciones", total: 38500 },
+      { tipo: "Egreso", categoria: "Material Didáctico y Librería", total: 19400 },
+      { tipo: "Egreso", categoria: "Artículos de Limpieza", total: 12500 },
+    ];
   },
   eliminarRendicion: async (id: number): Promise<void> => {
     if (isTauri) return invoke<void>("eliminar_rendicion", { id });

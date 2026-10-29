@@ -69,6 +69,9 @@ fn test_cuil_modulo_11_verification() {
     assert_eq!(db::calcular_cuil_modulo_11("40000004"), Some("20-40000004-3".to_string()));
     assert_eq!(db::calcular_cuil_modulo_11("32111222"), Some("20-32111222-7".to_string()));
 
+    // Resto 1 con prefijo 20: el algoritmo conmuta al prefijo 23
+    assert_eq!(db::calcular_cuil_modulo_11("20000009"), Some("23-20000009-9".to_string()));
+
     // Casos con caracteres de formateo
     assert_eq!(db::calcular_cuil_modulo_11("32.111.222"), Some("20-32111222-7".to_string()));
 
@@ -150,6 +153,12 @@ fn test_cross_data_integrity_asociado_comision_and_caja_pagos() {
         .query_row("SELECT movimiento_id FROM pagos WHERE id=?1", params![pago_id], |r| r.get(0))
         .unwrap();
 
+    // El ingreso automático en caja queda a nombre del usuario que cobró la cuota
+    let registrado_por_mov: i64 = conn
+        .query_row("SELECT registrado_por FROM movimientos_caja WHERE id=?1", params![mov_id], |r| r.get(0))
+        .unwrap();
+    assert_eq!(registrado_por_mov, 4, "El movimiento de caja debe registrar al usuario que cobró");
+
     // El asociado debe quedar "Al día"
     let estado_al_dia: String = conn
         .query_row("SELECT estado_cuotas FROM v_asociados WHERE id=2", [], |r| r.get(0))
@@ -207,12 +216,20 @@ fn test_dynamic_backup_and_restoration() {
     let r2 = commands::ejecutar_copia_interna(&state).expect("ejecutar_copia_interna sin cambios");
     assert!(!r2.creado, "Si los datos no sufrieron alteraciones, no debe duplicar copias");
 
-    // 3. Probar restauración de copia de seguridad (RF21)
-    // Mutamos la base
+    // 3. Tras una modificación de datos, la siguiente copia SÍ debe crearse
     {
         let db = state.db.lock().unwrap();
         db.execute("INSERT INTO configuracion(clave, valor) VALUES('test_flag', 'modificado')", []).unwrap();
     }
+    let r3 = commands::ejecutar_copia_interna(&state).expect("ejecutar_copia_interna con cambios");
+    assert!(r3.creado, "Si hubo cambios desde el último respaldo, debe generarse una copia nueva");
+    assert_ne!(r3.archivo, backup_file, "La nueva copia no debe pisar a la anterior aunque se cree en el mismo segundo");
+    assert!(test_dir.join("copias").join(&r3.archivo).exists(), "La tercera copia debe existir físicamente en disco");
+
+    let r4 = commands::ejecutar_copia_interna(&state).expect("ejecutar_copia_interna sin cambios nuevos");
+    assert!(!r4.creado, "Sin cambios posteriores a la tercera copia, no debe duplicarse");
+
+    // 4. Probar restauración de copia de seguridad (RF21): volver al estado de la primera copia
 
     // Restauramos desde la copia previa
     let res_restore = commands::restaurar_copia_interna(&state, &backup_file).expect("Restauración de backup");
@@ -404,6 +421,19 @@ fn test_db_migration_from_legacy_schema() {
     // Verificar que la columna anulado existe y el índice parcial está activo
     let count: i64 = conn.query_row("SELECT COUNT(*) FROM pagos WHERE anulado=0", [], |r| r.get(0)).unwrap();
     assert_eq!(count, 6);
+
+    // Las columnas agregadas en la Etapa 3 también deben existir tras la migración
+    for (tabla, columna) in [
+        ("movimientos_caja", "registrado_por"),
+        ("movimientos_caja", "adjunto_datos"),
+        ("reuniones", "registrado_por"),
+        ("reuniones", "archivo_adjunto"),
+    ] {
+        let existe: i64 = conn
+            .query_row(&format!("SELECT COUNT(*) FROM pragma_table_info('{}') WHERE name='{}'", tabla, columna), [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(existe, 1, "La migración debe agregar {}.{}", tabla, columna);
+    }
 
     let _ = fs::remove_dir_all(&test_dir);
 }

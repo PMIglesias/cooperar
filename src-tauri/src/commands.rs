@@ -32,6 +32,14 @@ fn auth_secretaria_o_admin(st: &State<AppState>) -> R<Usuario> {
     Ok(u)
 }
 
+fn auth_secretaria_presidente_o_admin(st: &State<AppState>) -> R<Usuario> {
+    let u = auth(st)?;
+    if u.rol != "Secretaria" && u.rol != "Presidente" && u.rol != "Superadmin" {
+        return Err("Acceso denegado: sólo la Secretaría, la Presidencia o el Superadministrador pueden gestionar asociados, reuniones y actas".to_string());
+    }
+    Ok(u)
+}
+
 fn auth_tesorero_o_admin(st: &State<AppState>) -> R<Usuario> {
     let u = auth(st)?;
     if u.rol != "Tesorero" && u.rol != "Superadmin" {
@@ -249,7 +257,7 @@ pub struct DatosAsociado {
 
 #[tauri::command]
 pub fn crear_asociado(st: State<AppState>, datos: DatosAsociado) -> R<i64> {
-    auth_secretaria_o_admin(&st)?;
+    auth_secretaria_presidente_o_admin(&st)?;
     let mut db = st.db.lock().map_err(s)?;
     let tx = db.transaction().map_err(s)?;
     tx.execute(
@@ -290,14 +298,14 @@ pub fn actualizar_asociado_interno(db: &mut Connection, id: i64, datos: &DatosAs
 
 #[tauri::command]
 pub fn actualizar_asociado(st: State<AppState>, id: i64, datos: DatosAsociado) -> R<()> {
-    auth_secretaria_o_admin(&st)?;
+    auth_secretaria_presidente_o_admin(&st)?;
     let mut db = st.db.lock().map_err(s)?;
     actualizar_asociado_interno(&mut db, id, &datos)
 }
 
 #[tauri::command]
 pub fn marcar_exento(st: State<AppState>, id: i64, exento: bool) -> R<()> {
-    auth_secretaria_o_admin(&st)?;
+    auth_secretaria_presidente_o_admin(&st)?;
     let db = st.db.lock().map_err(s)?;
     db.execute("UPDATE asociados SET exento=?1 WHERE id=?2", params![exento as i64, id]).map_err(s)?;
     Ok(())
@@ -305,7 +313,7 @@ pub fn marcar_exento(st: State<AppState>, id: i64, exento: bool) -> R<()> {
 
 #[tauri::command]
 pub fn dar_de_baja(st: State<AppState>, id: i64) -> R<()> {
-    auth_secretaria_o_admin(&st)?;
+    auth_secretaria_presidente_o_admin(&st)?;
     let db = st.db.lock().map_err(s)?;
     db.execute("UPDATE asociados SET activo=0 WHERE id=?1", params![id]).map_err(s)?;
     Ok(())
@@ -313,7 +321,7 @@ pub fn dar_de_baja(st: State<AppState>, id: i64) -> R<()> {
 
 #[tauri::command]
 pub fn reactivar_asociado(st: State<AppState>, id: i64) -> R<()> {
-    auth_secretaria_o_admin(&st)?;
+    auth_secretaria_presidente_o_admin(&st)?;
     let db = st.db.lock().map_err(s)?;
     db.execute("UPDATE asociados SET activo=1 WHERE id=?1", params![id]).map_err(s)?;
     Ok(())
@@ -447,8 +455,8 @@ pub fn registrar_pago_interno(db: &mut Connection, datos: &DatosPago, usuario_id
 
     // 1. Crear movimiento en caja automático
     tx.execute(
-        "INSERT INTO movimientos_caja(fecha, tipo, categoria, descripcion, monto, comprobante) VALUES(date('now','localtime'), 'Ingreso', 'Cuotas', ?1, ?2, ?3)",
-        params![desc, datos.monto, datos.comprobante],
+        "INSERT INTO movimientos_caja(fecha, tipo, categoria, descripcion, monto, comprobante, registrado_por) VALUES(date('now','localtime'), 'Ingreso', 'Cuotas', ?1, ?2, ?3, ?4)",
+        params![desc, datos.monto, datos.comprobante, usuario_id],
     ).map_err(s)?;
     let mov_id = tx.last_insert_rowid();
 
@@ -486,6 +494,9 @@ pub struct MovimientoCajaFila {
     pub comprobante: Option<String>,
     pub anulado: i64,
     pub motivo_anulacion: Option<String>,
+    pub adjunto_nombre: Option<String>,
+    /// "Rol (Nombre)" de quien cargó el movimiento; None en movimientos previos a la migración
+    pub registrado_por: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -502,18 +513,20 @@ pub fn listar_movimientos_caja(st: State<AppState>, tipo: String, categoria: Str
     auth(&st)?;
     let db = st.db.lock().map_err(s)?;
     let mut q = db.prepare(
-        "SELECT id, fecha, tipo, categoria, descripcion, monto, comprobante, anulado, motivo_anulacion
-         FROM movimientos_caja
-         WHERE (?1 = 'Todos' OR tipo = ?1)
-           AND (?2 = 'Todas' OR categoria = ?2)
-           AND (?3 = '' OR descripcion LIKE '%'||?3||'%' OR comprobante LIKE '%'||?3||'%')
-         ORDER BY fecha DESC, id DESC",
+        "SELECT m.id, m.fecha, m.tipo, m.categoria, m.descripcion, m.monto, m.comprobante, m.anulado, m.motivo_anulacion,
+                m.adjunto_nombre, u.rol || ' (' || u.nombre || ')'
+         FROM movimientos_caja m
+         LEFT JOIN usuarios u ON u.id = m.registrado_por
+         WHERE (?1 = 'Todos' OR m.tipo = ?1)
+           AND (?2 = 'Todas' OR m.categoria = ?2)
+           AND (?3 = '' OR m.descripcion LIKE '%'||?3||'%' OR m.comprobante LIKE '%'||?3||'%')
+         ORDER BY m.fecha DESC, m.id DESC",
     ).map_err(s)?;
     let rows = q.query_map(params![tipo, categoria, busqueda.trim()], |r| {
         Ok(MovimientoCajaFila {
             id: r.get(0)?, fecha: r.get(1)?, tipo: r.get(2)?, categoria: r.get(3)?,
             descripcion: r.get(4)?, monto: r.get(5)?, comprobante: r.get(6)?, anulado: r.get(7)?,
-            motivo_anulacion: r.get(8)?,
+            motivo_anulacion: r.get(8)?, adjunto_nombre: r.get(9)?, registrado_por: r.get(10)?,
         })
     }).map_err(s)?;
     let v = rows.collect::<Result<Vec<_>, _>>().map_err(s)?;
@@ -539,20 +552,57 @@ pub struct DatosMovimientoCaja {
     pub descripcion: String,
     pub monto: i64,
     pub comprobante: Option<String>,
+    /// Archivo escaneado (PDF o imagen) como data URL; se guarda en la base para que viaje con los respaldos
+    pub adjunto_nombre: Option<String>,
+    pub adjunto_datos: Option<String>,
 }
+
+/// RNF08: límite de 10 MB por archivo adjunto
+const LIMITE_ADJUNTO_BYTES: usize = 10 * 1024 * 1024;
 
 #[tauri::command]
 pub fn crear_movimiento_caja(st: State<AppState>, datos: DatosMovimientoCaja) -> R<i64> {
-    auth_tesorero_o_admin(&st)?;
+    let u = auth_tesorero_o_admin(&st)?;
     if datos.monto <= 0 {
         return Err("El monto del movimiento de caja debe ser mayor a 0".to_string());
     }
+    // base64 ocupa ~4/3 del archivo original
+    if datos.adjunto_datos.as_ref().map_or(false, |d| d.len() / 4 * 3 > LIMITE_ADJUNTO_BYTES) {
+        return Err("El comprobante adjunto supera el límite de 10 MB".to_string());
+    }
     let db = st.db.lock().map_err(s)?;
     db.execute(
-        "INSERT INTO movimientos_caja(fecha, tipo, categoria, descripcion, monto, comprobante) VALUES(date('now','localtime'), ?1, ?2, ?3, ?4, ?5)",
-        params![datos.tipo, datos.categoria.trim(), datos.descripcion.trim(), datos.monto, datos.comprobante],
+        "INSERT INTO movimientos_caja(fecha, tipo, categoria, descripcion, monto, comprobante, adjunto_nombre, adjunto_datos, registrado_por)
+         VALUES(date('now','localtime'), ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+        params![datos.tipo, datos.categoria.trim(), datos.descripcion.trim(), datos.monto, datos.comprobante,
+                datos.adjunto_nombre, datos.adjunto_datos, u.id],
     ).map_err(s)?;
     Ok(db.last_insert_rowid())
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AdjuntoMovimiento {
+    pub nombre: String,
+    pub data_url: String,
+}
+
+/// El listado sólo trae el nombre del adjunto; el contenido se pide al abrirlo
+#[tauri::command]
+pub fn obtener_adjunto_movimiento(st: State<AppState>, id: i64) -> R<Option<AdjuntoMovimiento>> {
+    auth(&st)?;
+    let db = st.db.lock().map_err(s)?;
+    let fila: Option<(Option<String>, Option<String>)> = db
+        .query_row("SELECT adjunto_nombre, adjunto_datos FROM movimientos_caja WHERE id=?1", params![id], |r| Ok((r.get(0)?, r.get(1)?)))
+        .optional()
+        .map_err(s)?;
+    Ok(match fila {
+        Some((nombre, Some(data_url))) => Some(AdjuntoMovimiento {
+            nombre: nombre.unwrap_or_else(|| "comprobante".to_string()),
+            data_url,
+        }),
+        _ => None,
+    })
 }
 
 pub fn anular_movimiento_caja_interno(db: &mut Connection, id: i64, motivo: Option<&str>) -> R<()> {
@@ -622,18 +672,21 @@ pub struct DatosReunion {
 
 #[tauri::command]
 pub fn crear_reunion(st: State<AppState>, datos: DatosReunion) -> R<i64> {
-    auth_secretaria_o_admin(&st)?;
+    let u = auth_secretaria_presidente_o_admin(&st)?;
     let db = st.db.lock().map_err(s)?;
     db.execute(
-        "INSERT INTO reuniones(fecha, tipo, temas) VALUES(?1, ?2, ?3)",
-        params![datos.fecha.trim(), datos.tipo.trim(), datos.temas.trim()],
+        "INSERT INTO reuniones(fecha, tipo, temas, registrado_por) VALUES(?1, ?2, ?3, ?4)",
+        params![datos.fecha.trim(), datos.tipo.trim(), datos.temas.trim(), u.id],
     ).map_err(s)?;
     Ok(db.last_insert_rowid())
 }
 
 #[tauri::command]
 pub fn guardar_acta(st: State<AppState>, id: i64, acta: String, archivo_adjunto: Option<String>) -> R<()> {
-    auth_secretaria_o_admin(&st)?;
+    auth_secretaria_presidente_o_admin(&st)?;
+    if archivo_adjunto.as_ref().map_or(false, |d| d.len() / 4 * 3 > LIMITE_ADJUNTO_BYTES) {
+        return Err("El acta adjunta supera el límite de 10 MB".to_string());
+    }
     let db = st.db.lock().map_err(s)?;
     db.execute(
         "UPDATE reuniones SET acta=?1, archivo_adjunto=?2 WHERE id=?3",
@@ -688,6 +741,43 @@ pub fn listar_rendiciones(st: State<AppState>) -> R<Vec<RendicionFila>> {
     }).map_err(s)?;
     let v = rows.collect::<Result<Vec<_>, _>>().map_err(s)?;
     Ok(v)
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LineaRendicion {
+    pub tipo: String,
+    pub categoria: String,
+    pub total: i64,
+}
+
+/// Totales por tipo y categoría de los movimientos no anulados del período de la rendición
+pub fn detalle_rendicion_interno(db: &Connection, id: i64) -> R<Vec<LineaRendicion>> {
+    let (desde, hasta): (String, String) = db.query_row(
+        "SELECT desde, hasta FROM rendiciones WHERE id=?1",
+        params![id],
+        |r| Ok((r.get(0)?, r.get(1)?)),
+    ).map_err(|_| "La rendición de cuentas no existe".to_string())?;
+
+    let mut q = db.prepare(
+        "SELECT tipo, categoria, SUM(monto)
+         FROM movimientos_caja
+         WHERE anulado=0 AND fecha BETWEEN ?1 AND ?2
+         GROUP BY tipo, categoria
+         ORDER BY tipo DESC, SUM(monto) DESC",
+    ).map_err(s)?;
+    let rows = q.query_map(params![desde, hasta], |r| {
+        Ok(LineaRendicion { tipo: r.get(0)?, categoria: r.get(1)?, total: r.get(2)? })
+    }).map_err(s)?;
+    let v = rows.collect::<Result<Vec<_>, _>>().map_err(s)?;
+    Ok(v)
+}
+
+#[tauri::command]
+pub fn detalle_rendicion(st: State<AppState>, id: i64) -> R<Vec<LineaRendicion>> {
+    auth(&st)?;
+    let db = st.db.lock().map_err(s)?;
+    detalle_rendicion_interno(&db, id)
 }
 
 #[derive(Deserialize)]
@@ -855,45 +945,45 @@ pub fn ejecutar_copia_interna(st: &AppState) -> R<ResultadoBackup> {
         }
     }
 
-    // 2. Comprobar PRAGMA data_version
-    let data_version_actual: i64 = db.query_row("PRAGMA data_version", [], |r| r.get(0)).map_err(s)?;
-    let ultima_data_version: Option<i64> = db
-        .query_row("SELECT valor FROM configuracion WHERE clave='backup_data_version'", [], |r| r.get(0))
-        .optional()
-        .map_err(s)?
-        .and_then(|v: String| v.parse().ok());
+    // 2. Comparar las filas modificadas por esta conexión (total_changes) con las registradas en el
+    //    último respaldo. PRAGMA data_version no sirve: sólo cambia con escrituras de OTRAS conexiones.
+    let cambios_actuales: i64 = db.query_row("SELECT total_changes()", [], |r| r.get(0)).map_err(s)?;
+    let cambios_respaldados = *st.cambios_ultimo_respaldo.lock().map_err(s)?;
 
-    let ultimo_archivo: Option<String> = db
-        .query_row("SELECT valor FROM configuracion WHERE clave='ultimo_archivo_backup'", [], |r| r.get(0))
-        .optional()
-        .map_err(s)?;
-
-    // Si ya existe al menos una copia física y la versión de datos no ha cambiado, omitir backup
-    if hay_copias {
-        if let Some(prev_ver) = ultima_data_version {
-            if prev_ver == data_version_actual {
-                let archivo_previo = ultimo_archivo.unwrap_or_else(|| "Último respaldo vigente".to_string());
-                return Ok(ResultadoBackup {
-                    creado: false,
-                    archivo: archivo_previo,
-                    mensaje: "Omitido: la base de datos no contiene cambios nuevos desde el último respaldo.".to_string(),
-                });
-            }
-        }
+    // Si ya existe al menos una copia física y no hubo escrituras desde el último respaldo, omitir backup
+    if hay_copias && cambios_actuales == cambios_respaldados {
+        let archivo_previo: String = db
+            .query_row("SELECT valor FROM configuracion WHERE clave='ultimo_archivo_backup'", [], |r| r.get(0))
+            .optional()
+            .map_err(s)?
+            .unwrap_or_else(|| "Último respaldo vigente".to_string());
+        return Ok(ResultadoBackup {
+            creado: false,
+            archivo: archivo_previo,
+            mensaje: "Omitido: la base de datos no contiene cambios nuevos desde el último respaldo.".to_string(),
+        });
     }
 
     // 3. Si hubo cambios o no existe copia, generar snapshot seguro mediante VACUUM INTO
+    //    (VACUUM INTO falla si el destino existe: dos copias en el mismo segundo llevan sufijo)
     let now_str: String = db.query_row("SELECT strftime('%Y%m%d_%H%M%S','now','localtime')", [], |r| r.get(0)).map_err(s)?;
-    let filename = format!("cooperar_backup_{}.db", now_str);
-    let dest_path = copias_dir.join(&filename);
-    let dest_str = dest_path.to_string_lossy().to_string();
+    let mut filename = format!("cooperar_backup_{}.db", now_str);
+    let mut sufijo = 2;
+    while copias_dir.join(&filename).exists() {
+        filename = format!("cooperar_backup_{}_{}.db", now_str, sufijo);
+        sufijo += 1;
+    }
+    let dest_str = copias_dir.join(&filename).to_string_lossy().to_string();
 
     db.execute("VACUUM INTO ?1", params![dest_str]).map_err(s)?;
 
     let fecha_humana: String = db.query_row("SELECT datetime('now','localtime')", [], |r| r.get(0)).map_err(s)?;
     db.execute("INSERT INTO configuracion(clave, valor) VALUES('ultima_copia', ?1) ON CONFLICT(clave) DO UPDATE SET valor=?1", params![fecha_humana]).map_err(s)?;
-    db.execute("INSERT INTO configuracion(clave, valor) VALUES('backup_data_version', ?1) ON CONFLICT(clave) DO UPDATE SET valor=?1", params![data_version_actual.to_string()]).map_err(s)?;
     db.execute("INSERT INTO configuracion(clave, valor) VALUES('ultimo_archivo_backup', ?1) ON CONFLICT(clave) DO UPDATE SET valor=?1", params![filename]).map_err(s)?;
+
+    // Se registra después de las escrituras de configuración para que no cuenten como cambios nuevos
+    *st.cambios_ultimo_respaldo.lock().map_err(s)? =
+        db.query_row("SELECT total_changes()", [], |r| r.get(0)).map_err(s)?;
 
     Ok(ResultadoBackup {
         creado: true,
@@ -904,7 +994,11 @@ pub fn ejecutar_copia_interna(st: &AppState) -> R<ResultadoBackup> {
 
 #[tauri::command]
 pub fn crear_copia_seguridad(st: State<AppState>) -> R<ResultadoBackup> {
-    auth_superadmin(&st)?;
+    // HU09: la Presidencia también puede respaldar (restaurar sigue siendo exclusivo del Superadmin)
+    let u = auth(&st)?;
+    if u.rol != "Superadmin" && u.rol != "Presidente" {
+        return Err("Acceso denegado: sólo el Superadministrador o la Presidencia pueden crear copias de seguridad".to_string());
+    }
     ejecutar_copia_interna(&st)
 }
 
@@ -1418,7 +1512,9 @@ pub fn leer_archivo_documento(st: State<AppState>, archivo_pdf: String) -> R<Str
 }
 
 #[tauri::command]
-pub fn exportar_pdf_escritorio(nombre_archivo: String, pdf_bytes_base64: String) -> R<String> {
+pub fn exportar_pdf_escritorio(st: State<AppState>, nombre_archivo: String, pdf_bytes_base64: String) -> R<String> {
+    auth(&st)?;
+    let nombre_archivo = sanitizar_nombre_archivo(&nombre_archivo)?;
     let bytes = decode_base64(&pdf_bytes_base64)?;
 
     let desktop_dir = get_desktop_dir();
@@ -1438,7 +1534,9 @@ pub fn exportar_pdf_escritorio(nombre_archivo: String, pdf_bytes_base64: String)
 }
 
 #[tauri::command]
-pub fn guardar_pdf_en_ruta(ruta_destino: String, pdf_bytes_base64: String) -> R<String> {
+pub fn guardar_pdf_en_ruta(st: State<AppState>, ruta_destino: String, pdf_bytes_base64: String) -> R<String> {
+    // La ruta la elige el usuario en el diálogo de guardado, por eso no se restringe a datos/
+    auth(&st)?;
     let bytes = decode_base64(&pdf_bytes_base64)?;
 
     let path = std::path::PathBuf::from(&ruta_destino);
