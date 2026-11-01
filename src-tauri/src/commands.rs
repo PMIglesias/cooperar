@@ -24,6 +24,14 @@ fn auth_superadmin(st: &State<AppState>) -> R<Usuario> {
     Ok(u)
 }
 
+fn auth_superadmin_o_asesor(st: &State<AppState>) -> R<Usuario> {
+    let u = auth(st)?;
+    if u.rol != "Superadmin" && u.rol != "Asesor" {
+        return Err("Acceso denegado: sólo el Superadministrador o el Asesor pueden consultar el historial".to_string());
+    }
+    Ok(u)
+}
+
 fn auth_secretaria_o_admin(st: &State<AppState>) -> R<Usuario> {
     let u = auth(st)?;
     if u.rol != "Secretaria" && u.rol != "Superadmin" {
@@ -58,6 +66,41 @@ fn auth_presidente_o_admin(st: &State<AppState>) -> R<Usuario> {
 
 fn one(db: &Connection, sql: &str) -> R<i64> {
     db.query_row(sql, [], |r| r.get(0)).map_err(s)
+}
+
+fn auditar(db: &Connection, usuario_id: i64, accion: &str, entidad: &str, entidad_id: Option<i64>) -> R<()> {
+    db.execute(
+        "INSERT INTO auditoria(usuario_id, accion, entidad, entidad_id) VALUES(?1, ?2, ?3, ?4)",
+        params![usuario_id, accion, entidad, entidad_id],
+    ).map_err(s)?;
+    Ok(())
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AuditoriaFila {
+    pub id: i64,
+    pub usuario: String,
+    pub fecha_hora: String,
+    pub accion: String,
+    pub entidad: String,
+    pub entidad_id: Option<i64>,
+}
+
+#[tauri::command]
+pub fn listar_auditoria(st: State<AppState>) -> R<Vec<AuditoriaFila>> {
+    auth_superadmin(&st)?;
+    let db = st.db.lock().map_err(s)?;
+    let mut stmt = db.prepare(
+        "SELECT a.id, COALESCE(u.nombre, 'Sistema'), a.fecha_hora, a.accion, a.entidad, a.entidad_id
+         FROM auditoria a LEFT JOIN usuarios u ON u.id=a.usuario_id
+         ORDER BY a.id DESC",
+    ).map_err(s)?;
+    let rows = stmt.query_map([], |r| Ok(AuditoriaFila {
+        id: r.get(0)?, usuario: r.get(1)?, fecha_hora: r.get(2)?, accion: r.get(3)?,
+        entidad: r.get(4)?, entidad_id: r.get(5)?,
+    })).map_err(s)?;
+    rows.collect::<Result<Vec<_>, _>>().map_err(s)
 }
 
 // ----------------------------------------------------
@@ -160,9 +203,11 @@ pub struct AsociadoFila {
     pub apellido_nombre: String,
     pub dni: String,
     pub telefono: Option<String>,
+    pub email: Option<String>,
     pub alumnos: Option<String>,
     pub estado_cuotas: String,
     pub activo: i64,
+    pub tipo_vinculo: String,
 }
 
 #[tauri::command]
@@ -175,7 +220,7 @@ pub fn listar_asociados(st: State<AppState>, busqueda: String, estado_cuotas: St
         _ => "", // "Todos"
     };
     let sql = format!(
-        "SELECT id,apellido_nombre,dni,telefono,alumnos,estado_cuotas,activo FROM v_asociados
+        "SELECT id,apellido_nombre,dni,telefono,email,alumnos,estado_cuotas,activo,tipo_vinculo FROM v_asociados
          WHERE (1=1 {})
            AND (?1='' OR apellido_nombre LIKE '%'||?1||'%' OR dni LIKE '%'||?1||'%')
            AND (?2='Todos' OR estado_cuotas=?2)
@@ -187,8 +232,9 @@ pub fn listar_asociados(st: State<AppState>, busqueda: String, estado_cuotas: St
         .query_map(params![busqueda.trim(), estado_cuotas], |r| {
             Ok(AsociadoFila {
                 id: r.get(0)?, apellido_nombre: r.get(1)?, dni: r.get(2)?,
-                telefono: r.get(3)?, alumnos: r.get(4)?, estado_cuotas: r.get(5)?,
-                activo: r.get(6)?,
+                telefono: r.get(3)?, email: r.get(4)?, alumnos: r.get(5)?, estado_cuotas: r.get(6)?,
+                activo: r.get(7)?,
+                tipo_vinculo: r.get(8)?,
             })
         })
         .map_err(s)?;
@@ -214,6 +260,7 @@ pub struct AsociadoDetalle {
     pub estado_cuotas: String,
     pub exento: i64,
     pub activo: i64,
+    pub tipo_vinculo: String,
 }
 
 #[tauri::command]
@@ -221,12 +268,12 @@ pub fn obtener_asociado(st: State<AppState>, id: i64) -> R<AsociadoDetalle> {
     auth(&st)?;
     let db = st.db.lock().map_err(s)?;
     let detalle = db.query_row(
-        "SELECT id,apellido_nombre,dni,telefono,email,fecha_alta,alumnos,estado_cuotas,exento,activo FROM v_asociados WHERE id=?1",
+        "SELECT id,apellido_nombre,dni,telefono,email,fecha_alta,alumnos,estado_cuotas,exento,activo,tipo_vinculo FROM v_asociados WHERE id=?1",
         params![id],
         |r| Ok((
             r.get::<_, i64>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?, r.get::<_, Option<String>>(3)?,
             r.get::<_, Option<String>>(4)?, r.get::<_, String>(5)?, r.get::<_, Option<String>>(6)?,
-            r.get::<_, String>(7)?, r.get::<_, i64>(8)?, r.get::<_, i64>(9)?,
+            r.get::<_, String>(7)?, r.get::<_, i64>(8)?, r.get::<_, i64>(9)?, r.get::<_, String>(10)?,
         )),
     )
     .map_err(s)?;
@@ -238,7 +285,7 @@ pub fn obtener_asociado(st: State<AppState>, id: i64) -> R<AsociadoDetalle> {
     Ok(AsociadoDetalle {
         id: detalle.0, apellido_nombre: detalle.1, dni: detalle.2, telefono: detalle.3,
         email: detalle.4, fecha_alta: detalle.5, alumnos: detalle.6, lista_alumnos,
-        estado_cuotas: detalle.7, exento: detalle.8, activo: detalle.9,
+        estado_cuotas: detalle.7, exento: detalle.8, activo: detalle.9, tipo_vinculo: detalle.10,
     })
 }
 
@@ -253,16 +300,17 @@ pub struct DatosAsociado {
     pub telefono: Option<String>,
     pub email: Option<String>,
     pub alumnos: Vec<NuevoAlumno>,
+    pub tipo_vinculo: String,
 }
 
 #[tauri::command]
 pub fn crear_asociado(st: State<AppState>, datos: DatosAsociado) -> R<i64> {
-    auth_secretaria_presidente_o_admin(&st)?;
+    let u = auth_secretaria_presidente_o_admin(&st)?;
     let mut db = st.db.lock().map_err(s)?;
     let tx = db.transaction().map_err(s)?;
     tx.execute(
-        "INSERT INTO asociados(apellido_nombre,dni,telefono,email) VALUES(?1,?2,?3,?4)",
-        params![datos.apellido_nombre.trim(), datos.dni.trim(), datos.telefono, datos.email],
+        "INSERT INTO asociados(apellido_nombre,dni,telefono,email,tipo_vinculo) VALUES(?1,?2,?3,?4,?5)",
+        params![datos.apellido_nombre.trim(), datos.dni.trim(), datos.telefono, datos.email, datos.tipo_vinculo],
     )
     .map_err(s)?;
     let id = tx.last_insert_rowid();
@@ -272,14 +320,15 @@ pub fn crear_asociado(st: State<AppState>, datos: DatosAsociado) -> R<i64> {
         }
     }
     tx.commit().map_err(s)?;
+    auditar(&db, u.id, "CREAR", "asociado", Some(id))?;
     Ok(id)
 }
 
 pub fn actualizar_asociado_interno(db: &mut Connection, id: i64, datos: &DatosAsociado) -> R<()> {
     let tx = db.transaction().map_err(s)?;
     tx.execute(
-        "UPDATE asociados SET apellido_nombre=?1,dni=?2,telefono=?3,email=?4 WHERE id=?5",
-        params![datos.apellido_nombre.trim(), datos.dni.trim(), datos.telefono, datos.email, id],
+        "UPDATE asociados SET apellido_nombre=?1,dni=?2,telefono=?3,email=?4,tipo_vinculo=?5 WHERE id=?6",
+        params![datos.apellido_nombre.trim(), datos.dni.trim(), datos.telefono, datos.email, datos.tipo_vinculo, id],
     )
     .map_err(s)?;
     // Mantener sincronizada la nómina de autoridades en caso de que este asociado integre la comisión directiva
@@ -298,32 +347,58 @@ pub fn actualizar_asociado_interno(db: &mut Connection, id: i64, datos: &DatosAs
 
 #[tauri::command]
 pub fn actualizar_asociado(st: State<AppState>, id: i64, datos: DatosAsociado) -> R<()> {
-    auth_secretaria_presidente_o_admin(&st)?;
+    let u = auth_secretaria_presidente_o_admin(&st)?;
     let mut db = st.db.lock().map_err(s)?;
-    actualizar_asociado_interno(&mut db, id, &datos)
+    actualizar_asociado_interno(&mut db, id, &datos)?;
+    auditar(&db, u.id, "ACTUALIZAR", "asociado", Some(id))
 }
 
 #[tauri::command]
 pub fn marcar_exento(st: State<AppState>, id: i64, exento: bool) -> R<()> {
-    auth_secretaria_presidente_o_admin(&st)?;
+    let u = auth_secretaria_presidente_o_admin(&st)?;
     let db = st.db.lock().map_err(s)?;
     db.execute("UPDATE asociados SET exento=?1 WHERE id=?2", params![exento as i64, id]).map_err(s)?;
+    auditar(&db, u.id, if exento { "MARCAR_EXENTO" } else { "QUITAR_EXENTO" }, "asociado", Some(id))?;
     Ok(())
 }
 
 #[tauri::command]
 pub fn dar_de_baja(st: State<AppState>, id: i64) -> R<()> {
-    auth_secretaria_presidente_o_admin(&st)?;
+    let u = auth_secretaria_presidente_o_admin(&st)?;
     let db = st.db.lock().map_err(s)?;
     db.execute("UPDATE asociados SET activo=0 WHERE id=?1", params![id]).map_err(s)?;
+    auditar(&db, u.id, "DAR_DE_BAJA", "asociado", Some(id))?;
     Ok(())
 }
 
 #[tauri::command]
 pub fn reactivar_asociado(st: State<AppState>, id: i64) -> R<()> {
-    auth_secretaria_presidente_o_admin(&st)?;
+    let u = auth_secretaria_presidente_o_admin(&st)?;
     let db = st.db.lock().map_err(s)?;
     db.execute("UPDATE asociados SET activo=1 WHERE id=?1", params![id]).map_err(s)?;
+    auditar(&db, u.id, "REACTIVAR", "asociado", Some(id))?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn eliminar_asociado(st: State<AppState>, id: i64) -> R<()> {
+    let u = auth_secretaria_o_admin(&st)?;
+    let mut db = st.db.lock().map_err(s)?;
+    let pagos: i64 = db.query_row("SELECT COUNT(*) FROM pagos WHERE asociado_id=?1", params![id], |r| r.get(0)).map_err(s)?;
+    if pagos > 0 {
+        return Err("No se puede eliminar un asociado que tiene pagos registrados. Puede darlo de baja.".to_string());
+    }
+    let vinculado: i64 = db.query_row("SELECT COUNT(*) FROM comision_directiva WHERE asociado_id=?1", params![id], |r| r.get(0)).map_err(s)?;
+    if vinculado > 0 {
+        return Err("No se puede eliminar un asociado vinculado a la Nómina de Autoridades. Quite primero la vinculación.".to_string());
+    }
+    let tx = db.transaction().map_err(s)?;
+    tx.execute("DELETE FROM asociados WHERE id=?1", params![id]).map_err(s)?;
+    tx.execute(
+        "INSERT INTO auditoria(usuario_id, accion, entidad, entidad_id) VALUES(?1, 'ELIMINAR', 'asociado', ?2)",
+        params![u.id, id],
+    ).map_err(s)?;
+    tx.commit().map_err(s)?;
     Ok(())
 }
 
@@ -346,6 +421,8 @@ pub struct PagoFila {
     pub registrado_por: String,
     pub registrado_por_rol: Option<String>,
     pub registrado_por_nombre: Option<String>,
+    pub movimiento_id: Option<i64>,
+    pub adjunto_nombre: Option<String>,
 }
 
 #[tauri::command]
@@ -353,10 +430,11 @@ pub fn listar_pagos(st: State<AppState>, busqueda: String, periodo: String) -> R
     auth(&st)?;
     let db = st.db.lock().map_err(s)?;
     let mut q = db.prepare(
-        "SELECT p.id, p.asociado_id, a.apellido_nombre, a.dni, p.periodo, p.fecha_pago, p.monto, p.medio, p.comprobante, u.nombre, u.rol
+        "SELECT p.id, p.asociado_id, a.apellido_nombre, a.dni, p.periodo, p.fecha_pago, p.monto, p.medio, p.comprobante, u.nombre, u.rol, p.movimiento_id, m.adjunto_nombre
          FROM pagos p
          JOIN asociados a ON a.id = p.asociado_id
          JOIN usuarios u ON u.id = p.registrado_por
+         LEFT JOIN movimientos_caja m ON m.id = p.movimiento_id
          WHERE (?1 = '' OR a.apellido_nombre LIKE '%'||?1||'%' OR a.dni LIKE '%'||?1||'%' OR p.comprobante LIKE '%'||?1||'%')
            AND (?2 = 'Todos' OR ?2 = '' OR p.periodo = ?2)
          ORDER BY p.fecha_pago DESC, p.id DESC",
@@ -371,6 +449,8 @@ pub fn listar_pagos(st: State<AppState>, busqueda: String, periodo: String) -> R
             registrado_por: format!("{} ({})", rol, nombre),
             registrado_por_rol: Some(rol),
             registrado_por_nombre: Some(nombre),
+            movimiento_id: r.get(11)?,
+            adjunto_nombre: r.get(12)?,
         })
     }).map_err(s)?;
     let v = rows.collect::<Result<Vec<_>, _>>().map_err(s)?;
@@ -382,10 +462,11 @@ pub fn obtener_historial_pagos_asociado(st: State<AppState>, asociado_id: i64) -
     auth(&st)?;
     let db = st.db.lock().map_err(s)?;
     let mut q = db.prepare(
-        "SELECT p.id, p.asociado_id, a.apellido_nombre, a.dni, p.periodo, p.fecha_pago, p.monto, p.medio, p.comprobante, u.nombre, u.rol
+        "SELECT p.id, p.asociado_id, a.apellido_nombre, a.dni, p.periodo, p.fecha_pago, p.monto, p.medio, p.comprobante, u.nombre, u.rol, p.movimiento_id, m.adjunto_nombre
          FROM pagos p
          JOIN asociados a ON a.id = p.asociado_id
          JOIN usuarios u ON u.id = p.registrado_por
+         LEFT JOIN movimientos_caja m ON m.id = p.movimiento_id
          WHERE p.asociado_id = ?1
          ORDER BY p.periodo DESC, p.fecha_pago DESC",
     ).map_err(s)?;
@@ -399,6 +480,8 @@ pub fn obtener_historial_pagos_asociado(st: State<AppState>, asociado_id: i64) -
             registrado_por: format!("{} ({})", rol, nombre),
             registrado_por_rol: Some(rol),
             registrado_por_nombre: Some(nombre),
+            movimiento_id: r.get(11)?,
+            adjunto_nombre: r.get(12)?,
         })
     }).map_err(s)?;
     let v = rows.collect::<Result<Vec<_>, _>>().map_err(s)?;
@@ -413,6 +496,8 @@ pub struct DatosPago {
     pub monto: i64,
     pub medio: String,
     pub comprobante: Option<String>,
+    pub adjunto_nombre: Option<String>,
+    pub adjunto_datos: Option<String>,
 }
 
 pub fn registrar_pago_interno(db: &mut Connection, datos: &DatosPago, usuario_id: i64) -> R<i64> {
@@ -455,8 +540,8 @@ pub fn registrar_pago_interno(db: &mut Connection, datos: &DatosPago, usuario_id
 
     // 1. Crear movimiento en caja automático
     tx.execute(
-        "INSERT INTO movimientos_caja(fecha, tipo, categoria, descripcion, monto, comprobante, registrado_por) VALUES(date('now','localtime'), 'Ingreso', 'Cuotas', ?1, ?2, ?3, ?4)",
-        params![desc, datos.monto, datos.comprobante, usuario_id],
+        "INSERT INTO movimientos_caja(fecha, tipo, categoria, descripcion, monto, comprobante, adjunto_nombre, adjunto_datos, registrado_por) VALUES(date('now','localtime'), 'Ingreso', 'Cuotas', ?1, ?2, ?3, ?4, ?5, ?6)",
+        params![desc, datos.monto, datos.comprobante, datos.adjunto_nombre, datos.adjunto_datos, usuario_id],
     ).map_err(s)?;
     let mov_id = tx.last_insert_rowid();
 
@@ -475,7 +560,9 @@ pub fn registrar_pago_interno(db: &mut Connection, datos: &DatosPago, usuario_id
 pub fn registrar_pago(st: State<AppState>, datos: DatosPago) -> R<i64> {
     let u = auth_tesorero_o_admin(&st)?;
     let mut db = st.db.lock().map_err(s)?;
-    registrar_pago_interno(&mut db, &datos, u.id)
+    let id = registrar_pago_interno(&mut db, &datos, u.id)?;
+    auditar(&db, u.id, "CREAR", "pago", Some(id))?;
+    Ok(id)
 }
 
 // ----------------------------------------------------
@@ -796,7 +883,9 @@ pub fn crear_rendicion(st: State<AppState>, datos: DatosRendicion) -> R<i64> {
         "INSERT INTO rendiciones(periodo, desde, hasta, generada_en, generada_por, estado) VALUES(?1, ?2, ?3, datetime('now','localtime'), ?4, 'Borrador')",
         params![datos.periodo.trim(), datos.desde.trim(), datos.hasta.trim(), u.id],
     ).map_err(s)?;
-    Ok(db.last_insert_rowid())
+    let id = db.last_insert_rowid();
+    auditar(&db, u.id, "CREAR", "rendicion", Some(id))?;
+    Ok(id)
 }
 
 #[tauri::command]
@@ -807,6 +896,7 @@ pub fn aprobar_rendicion(st: State<AppState>, id: i64) -> R<()> {
         "UPDATE rendiciones SET estado='Aprobada', aprobada_por=?1, aprobada_en=datetime('now','localtime') WHERE id=?2",
         params![u.id, id],
     ).map_err(s)?;
+    auditar(&db, u.id, "APROBAR", "rendicion", Some(id))?;
     Ok(())
 }
 
@@ -827,9 +917,10 @@ pub fn eliminar_rendicion_interno(db: &Connection, id: i64) -> R<()> {
 
 #[tauri::command]
 pub fn eliminar_rendicion(st: State<AppState>, id: i64) -> R<()> {
-    auth_tesorero_o_admin(&st)?;
+    let u = auth_tesorero_o_admin(&st)?;
     let db = st.db.lock().map_err(s)?;
-    eliminar_rendicion_interno(&db, id)
+    eliminar_rendicion_interno(&db, id)?;
+    auditar(&db, u.id, "ELIMINAR", "rendicion", Some(id))
 }
 
 // ----------------------------------------------------
@@ -842,19 +933,19 @@ pub struct UsuarioFila {
     pub id: i64,
     pub nombre: String,
     pub dni: String,
-    pub email: Option<String>,
+    pub cargo: Option<String>,
     pub rol: String,
     pub activo: i64,
 }
 
 #[tauri::command]
 pub fn listar_usuarios(st: State<AppState>) -> R<Vec<UsuarioFila>> {
-    auth_superadmin(&st)?;
+    auth_superadmin_o_asesor(&st)?;
     let db = st.db.lock().map_err(s)?;
-    let mut q = db.prepare("SELECT id, nombre, dni, email, rol, activo FROM usuarios ORDER BY id").map_err(s)?;
+    let mut q = db.prepare("SELECT u.id, u.nombre, u.dni, CASE WHEN u.rol='Superadmin' THEN NULL ELSE c.cargo END, u.rol, u.activo FROM usuarios u LEFT JOIN comision_directiva c ON c.dni = u.dni ORDER BY u.id").map_err(s)?;
     let rows = q.query_map([], |r| {
         Ok(UsuarioFila {
-            id: r.get(0)?, nombre: r.get(1)?, dni: r.get(2)?, email: r.get(3)?,
+            id: r.get(0)?, nombre: r.get(1)?, dni: r.get(2)?, cargo: r.get(3)?,
             rol: r.get(4)?, activo: r.get(5)?,
         })
     }).map_err(s)?;
@@ -867,27 +958,28 @@ pub fn listar_usuarios(st: State<AppState>) -> R<Vec<UsuarioFila>> {
 pub struct DatosUsuario {
     pub nombre: String,
     pub dni: String,
-    pub email: Option<String>,
     pub rol: String,
     pub clave: Option<String>,
 }
 
 #[tauri::command]
 pub fn crear_usuario(st: State<AppState>, datos: DatosUsuario) -> R<i64> {
-    auth_superadmin(&st)?;
+    let u = auth_superadmin(&st)?;
     let db = st.db.lock().map_err(s)?;
     let clave = datos.clave.unwrap_or_else(|| "admin123".to_string());
     let hash_str = db::hash(&clave);
     db.execute(
-        "INSERT INTO usuarios(nombre, dni, email, rol, clave_hash) VALUES(?1, ?2, ?3, ?4, ?5)",
-        params![datos.nombre.trim(), datos.dni.trim(), datos.email, datos.rol.trim(), hash_str],
+        "INSERT INTO usuarios(nombre, dni, email, rol, clave_hash) VALUES(?1, ?2, NULL, ?3, ?4)",
+        params![datos.nombre.trim(), datos.dni.trim(), datos.rol.trim(), hash_str],
     ).map_err(s)?;
-    Ok(db.last_insert_rowid())
+    let id = db.last_insert_rowid();
+    auditar(&db, u.id, "CREAR", "usuario", Some(id))?;
+    Ok(id)
 }
 
 #[tauri::command]
 pub fn actualizar_usuario(st: State<AppState>, id: i64, datos: DatosUsuario) -> R<()> {
-    auth_superadmin(&st)?;
+    let u = auth_superadmin(&st)?;
     let db = st.db.lock().map_err(s)?;
     if let Some(ref c) = datos.clave {
         if !c.trim().is_empty() {
@@ -896,17 +988,19 @@ pub fn actualizar_usuario(st: State<AppState>, id: i64, datos: DatosUsuario) -> 
         }
     }
     db.execute(
-        "UPDATE usuarios SET nombre=?1, dni=?2, email=?3, rol=?4 WHERE id=?5",
-        params![datos.nombre.trim(), datos.dni.trim(), datos.email, datos.rol.trim(), id],
+        "UPDATE usuarios SET nombre=?1, dni=?2, email=NULL, rol=?3 WHERE id=?4",
+        params![datos.nombre.trim(), datos.dni.trim(), datos.rol.trim(), id],
     ).map_err(s)?;
+    auditar(&db, u.id, "ACTUALIZAR", "usuario", Some(id))?;
     Ok(())
 }
 
 #[tauri::command]
 pub fn cambiar_estado_usuario(st: State<AppState>, id: i64, activo: bool) -> R<()> {
-    auth_superadmin(&st)?;
+    let u = auth_superadmin(&st)?;
     let db = st.db.lock().map_err(s)?;
     db.execute("UPDATE usuarios SET activo=?1 WHERE id=?2", params![activo as i64, id]).map_err(s)?;
+    auditar(&db, u.id, if activo { "ACTIVAR" } else { "DESACTIVAR" }, "usuario", Some(id))?;
     Ok(())
 }
 
@@ -1004,7 +1098,7 @@ pub fn crear_copia_seguridad(st: State<AppState>) -> R<ResultadoBackup> {
 
 #[tauri::command]
 pub fn listar_copias_seguridad(st: State<AppState>) -> R<Vec<CopiaSeguridadFila>> {
-    auth_superadmin(&st)?;
+    auth_superadmin_o_asesor(&st)?;
     let copias_dir = st.data_dir.join("copias");
     let mut copias = Vec::new();
     if let Ok(entries) = std::fs::read_dir(copias_dir) {
@@ -1127,7 +1221,7 @@ pub fn guardar_configuracion(st: State<AppState>, clave: String, valor: String) 
 
 #[tauri::command]
 pub fn obtener_ruta_datos(st: State<AppState>, ) -> R<String> {
-    auth_superadmin(&st)?;
+    auth_superadmin_o_asesor(&st)?;
     Ok(st.data_dir.to_string_lossy().to_string())
 }
 
@@ -1142,6 +1236,7 @@ pub struct MiembroComisionFila {
     pub orden: i64,
     pub cargo: String,
     pub asociado_id: Option<i64>,
+    pub personal_establecimiento_id: Option<i64>,
     pub nombre: String,
     pub dni: String,
     pub cuil: String,
@@ -1163,6 +1258,9 @@ pub struct DocumentoAsambleaFila {
     pub generado_por: String,
     pub archivo_pdf: String,
     pub datos_json: String,
+    pub aprobado: i64,
+    pub aprobado_por: Option<String>,
+    pub aprobado_en: Option<String>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -1180,7 +1278,7 @@ pub fn listar_comision_directiva(st: State<AppState>) -> R<Vec<MiembroComisionFi
     auth(&st)?;
     let db = st.db.lock().map_err(s)?;
     let mut stmt = db.prepare(
-        "SELECT id, orden, cargo, asociado_id, nombre, dni, cuil, domicilio, localidad, telefono, email, vencimiento 
+        "SELECT id, orden, cargo, asociado_id, personal_establecimiento_id, nombre, dni, cuil, domicilio, localidad, telefono, email, vencimiento 
          FROM comision_directiva ORDER BY orden ASC"
     ).map_err(s)?;
     let rows = stmt.query_map([], |r| {
@@ -1189,14 +1287,15 @@ pub fn listar_comision_directiva(st: State<AppState>) -> R<Vec<MiembroComisionFi
             orden: r.get(1)?,
             cargo: r.get(2)?,
             asociado_id: r.get(3)?,
-            nombre: r.get(4)?,
-            dni: r.get(5)?,
-            cuil: r.get(6)?,
-            domicilio: r.get(7)?,
-            localidad: r.get(8)?,
-            telefono: r.get(9)?,
-            email: r.get(10)?,
-            vencimiento: r.get(11)?,
+            personal_establecimiento_id: r.get(4)?,
+            nombre: r.get(5)?,
+            dni: r.get(6)?,
+            cuil: r.get(7)?,
+            domicilio: r.get(8)?,
+            localidad: r.get(9)?,
+            telefono: r.get(10)?,
+            email: r.get(11)?,
+            vencimiento: r.get(12)?,
         })
     }).map_err(s)?;
 
@@ -1209,29 +1308,30 @@ pub fn listar_comision_directiva(st: State<AppState>) -> R<Vec<MiembroComisionFi
 
 #[tauri::command]
 pub fn guardar_miembro_comision(st: State<AppState>, miembro: MiembroComisionFila) -> R<()> {
-    auth_secretaria_o_admin(&st)?;
+    let u = auth_secretaria_o_admin(&st)?;
     let db = st.db.lock().map_err(s)?;
     if miembro.id == 0 {
         db.execute(
-            "INSERT INTO comision_directiva(orden, cargo, asociado_id, nombre, dni, cuil, domicilio, localidad, telefono, email, vencimiento)
-             VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+            "INSERT INTO comision_directiva(orden, cargo, asociado_id, personal_establecimiento_id, nombre, dni, cuil, domicilio, localidad, telefono, email, vencimiento)
+             VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
             params![
-                miembro.orden, miembro.cargo, miembro.asociado_id, miembro.nombre, miembro.dni, miembro.cuil,
+                miembro.orden, miembro.cargo, miembro.asociado_id, miembro.personal_establecimiento_id, miembro.nombre, miembro.dni, miembro.cuil,
                 miembro.domicilio, miembro.localidad, miembro.telefono, miembro.email, miembro.vencimiento
             ],
         ).map_err(s)?;
     } else {
         db.execute(
-            "UPDATE comision_directiva SET orden=?1, cargo=?2, asociado_id=?3, nombre=?4, dni=?5, cuil=?6, domicilio=?7, localidad=?8, telefono=?9, email=?10, vencimiento=?11
-             WHERE id=?12",
+            "UPDATE comision_directiva SET orden=?1, cargo=?2, asociado_id=?3, personal_establecimiento_id=?4, nombre=?5, dni=?6, cuil=?7, domicilio=?8, localidad=?9, telefono=?10, email=?11, vencimiento=?12
+             WHERE id=?13",
             params![
-                miembro.orden, miembro.cargo, miembro.asociado_id, miembro.nombre, miembro.dni, miembro.cuil,
-                miembro.domicilio, miembro.localidad, miembro.telefono, miembro.email, miembro.vencimiento,
-                miembro.id
+                miembro.orden, miembro.cargo, miembro.asociado_id, miembro.personal_establecimiento_id, miembro.nombre, miembro.dni, miembro.cuil,
+                miembro.domicilio, miembro.localidad, miembro.telefono, miembro.email, miembro.vencimiento, miembro.id
             ],
         ).map_err(s)?;
     }
-    Ok(())
+    let accion = if miembro.id == 0 { "CREAR" } else { "ACTUALIZAR" };
+    let id = if miembro.id == 0 { db.last_insert_rowid() } else { miembro.id };
+    auditar(&db, u.id, accion, "miembro_comision", Some(id))
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -1275,7 +1375,7 @@ pub fn listar_personal_establecimiento(st: State<AppState>) -> R<Vec<PersonalEst
 
 #[tauri::command]
 pub fn guardar_personal_establecimiento(st: State<AppState>, p: PersonalEstablecimientoFila) -> R<PersonalEstablecimientoFila> {
-    auth_secretaria_o_admin(&st)?;
+    let u = auth_secretaria_o_admin(&st)?;
     let db = st.db.lock().map_err(s)?;
     let id = if p.id == 0 {
         db.execute(
@@ -1293,8 +1393,17 @@ pub fn guardar_personal_establecimiento(st: State<AppState>, p: PersonalEstablec
         p.id
     };
 
-    // Si tiene un vínculo con la nómina de la comisión directiva, actualizar automáticamente el cargo correspondiente
-    if p.vinculo_nomina == "ASESOR" {
+    // Mantener compatibilidad con vínculos históricos y permitir cualquier autoridad de la nómina.
+    if let Some(id_text) = p.vinculo_nomina.strip_prefix("AUTORIDAD:") {
+        let autoridad_id: i64 = id_text.parse().map_err(|_| "Vínculo de autoridad inválido".to_string())?;
+        let updated = db.execute(
+            "UPDATE comision_directiva SET nombre=?1, dni=?2, telefono=?3, email=?4 WHERE id=?5",
+            params![p.nombre, p.dni, p.telefono, p.email, autoridad_id],
+        ).map_err(s)?;
+        if updated == 0 {
+            return Err("La autoridad seleccionada no existe".to_string());
+        }
+    } else if p.vinculo_nomina == "ASESOR" {
         let _ = db.execute(
             "UPDATE comision_directiva SET nombre=?1, dni=?2, telefono=?3, email=?4 WHERE orden=16 OR cargo LIKE '%ASESOR%'",
             params![p.nombre, p.dni, p.telefono, p.email],
@@ -1311,6 +1420,7 @@ pub fn guardar_personal_establecimiento(st: State<AppState>, p: PersonalEstablec
         );
     }
 
+    auditar(&db, u.id, if p.id == 0 { "CREAR" } else { "ACTUALIZAR" }, "personal_establecimiento", Some(id))?;
     Ok(PersonalEstablecimientoFila {
         id,
         cargo: p.cargo,
@@ -1324,10 +1434,10 @@ pub fn guardar_personal_establecimiento(st: State<AppState>, p: PersonalEstablec
 
 #[tauri::command]
 pub fn eliminar_personal_establecimiento(st: State<AppState>, id: i64) -> R<()> {
-    auth_secretaria_o_admin(&st)?;
+    let u = auth_secretaria_o_admin(&st)?;
     let db = st.db.lock().map_err(s)?;
     db.execute("DELETE FROM personal_establecimiento WHERE id=?1", params![id]).map_err(s)?;
-    Ok(())
+    auditar(&db, u.id, "ELIMINAR", "personal_establecimiento", Some(id))
 }
 
 #[tauri::command]
@@ -1335,7 +1445,7 @@ pub fn listar_documentos_asambleas(st: State<AppState>) -> R<Vec<DocumentoAsambl
     auth(&st)?;
     let db = st.db.lock().map_err(s)?;
     let mut stmt = db.prepare(
-        "SELECT id, tipo, titulo, periodo, fecha_generacion, generado_por, archivo_pdf, datos_json 
+        "SELECT id, tipo, titulo, periodo, fecha_generacion, generado_por, archivo_pdf, datos_json, aprobado, aprobado_por, aprobado_en
          FROM documentos_asambleas ORDER BY id DESC"
     ).map_err(s)?;
     let rows = stmt.query_map([], |r| {
@@ -1348,6 +1458,9 @@ pub fn listar_documentos_asambleas(st: State<AppState>) -> R<Vec<DocumentoAsambl
             generado_por: r.get(5)?,
             archivo_pdf: r.get(6)?,
             datos_json: r.get(7)?,
+            aprobado: r.get(8)?,
+            aprobado_por: r.get(9)?,
+            aprobado_en: r.get(10)?,
         })
     }).map_err(s)?;
 
@@ -1437,7 +1550,7 @@ fn get_desktop_dir() -> std::path::PathBuf {
 
 #[tauri::command]
 pub fn guardar_documento_asamblea(st: State<AppState>, params: GuardarDocumentoParams) -> R<DocumentoAsambleaFila> {
-    let u = auth(&st)?;
+    let u = auth_secretaria_o_admin(&st)?;
     let docs_dir = st.data_dir.join("documentos");
     std::fs::create_dir_all(&docs_dir).map_err(s)?;
 
@@ -1466,6 +1579,7 @@ pub fn guardar_documento_asamblea(st: State<AppState>, params: GuardarDocumentoP
     ).map_err(s)?;
 
     let id = db.last_insert_rowid();
+    auditar(&db, u.id, "GENERAR", "documento_asamblea", Some(id))?;
 
     Ok(DocumentoAsambleaFila {
         id,
@@ -1476,12 +1590,30 @@ pub fn guardar_documento_asamblea(st: State<AppState>, params: GuardarDocumentoP
         generado_por: u.nombre,
         archivo_pdf: filename,
         datos_json: params.datos_json,
+        aprobado: 0,
+        aprobado_por: None,
+        aprobado_en: None,
     })
 }
 
 #[tauri::command]
+pub fn aprobar_documento_asamblea(st: State<AppState>, id: i64) -> R<()> {
+    let u = auth_secretaria_presidente_o_admin(&st)?;
+    let db = st.db.lock().map_err(s)?;
+    let updated = db.execute(
+        "UPDATE documentos_asambleas SET aprobado=1, aprobado_por=?1, aprobado_en=strftime('%Y-%m-%d %H:%M','now','localtime') WHERE id=?2",
+        params![u.nombre, id],
+    ).map_err(s)?;
+    if updated == 0 {
+        return Err("Documento de asamblea no encontrado".to_string());
+    }
+    auditar(&db, u.id, "APROBAR", "documento_asamblea", Some(id))?;
+    Ok(())
+}
+
+#[tauri::command]
 pub fn eliminar_documento_asamblea(st: State<AppState>, id: i64) -> R<()> {
-    auth_secretaria_o_admin(&st)?;
+    let u = auth_secretaria_o_admin(&st)?;
     let db = st.db.lock().map_err(s)?;
     let archivo_pdf: Option<String> = db
         .query_row("SELECT archivo_pdf FROM documentos_asambleas WHERE id=?1", params![id], |r| r.get(0))
@@ -1496,7 +1628,7 @@ pub fn eliminar_documento_asamblea(st: State<AppState>, id: i64) -> R<()> {
     }
 
     db.execute("DELETE FROM documentos_asambleas WHERE id=?1", params![id]).map_err(s)?;
-    Ok(())
+    auditar(&db, u.id, "ELIMINAR", "documento_asamblea", Some(id))
 }
 
 #[tauri::command]

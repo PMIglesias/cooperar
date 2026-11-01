@@ -8,7 +8,7 @@ import Badge from "../components/ui/Badge";
 import DataTable, { Column } from "../components/ui/DataTable";
 import { Field, SelectField } from "../components/ui/Field";
 import IconButton from "../components/ui/IconButton";
-import { DocumentIcon, EditIcon, PaperclipIcon } from "../components/icons";
+import { DocumentIcon, EditIcon, EyeIcon, PaperclipIcon, PrinterIcon } from "../components/icons";
 import { useApp } from "../context";
 import s from "./Reuniones.module.css";
 
@@ -45,6 +45,37 @@ export default function Reuniones() {
       .then(setReuniones)
       .catch(console.error)
       .finally(() => setLoading(false));
+  };
+
+  const imprimirActa = () => {
+    if (!reunionActa) return;
+    const escapar = (valor: string) => valor.replace(/[&<>"']/g, (caracter) => ({
+      "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
+    }[caracter] || caracter));
+    const iframe = document.createElement("iframe");
+    Object.assign(iframe.style, { position: "fixed", width: "1px", height: "1px", border: "0", opacity: "0" });
+    document.body.appendChild(iframe);
+    iframe.contentDocument?.open();
+    iframe.contentDocument?.write(`<!doctype html><html lang="es"><head><meta charset="utf-8"><title>Acta</title>
+      <style>
+        @page { size: A4 portrait; margin: 20mm; }
+        body { font-family: Arial, sans-serif; color: #1f2937; margin: 0; }
+        h1 { margin: 0 0 8px; font-size: 22px; text-align: center; }
+        .meta { text-align: center; color: #4b5563; margin-bottom: 24px; }
+        .topics { padding: 12px; margin-bottom: 24px; background: #f3f4f6; border: 1px solid #d1d5db; }
+        .acta { white-space: pre-wrap; line-height: 1.6; font-size: 14px; }
+      </style></head><body>
+      <h1>Acta de ${escapar(reunionActa.tipo === "Asamblea" ? "Asamblea General" : "Reunión de Comisión Directiva")}</h1>
+      <div class="meta">${escapar(reunionActa.fecha)}</div>
+      <div class="topics"><strong>Orden del día</strong><br>${escapar(reunionActa.temas)}</div>
+      <div class="acta">${escapar(textoActa || "Acta aún no redactada.")}</div>
+      </body></html>`);
+    iframe.contentDocument?.close();
+    setTimeout(() => {
+      iframe.contentWindow?.focus();
+      iframe.contentWindow?.print();
+      setTimeout(() => iframe.remove(), 1000);
+    }, 100);
   };
 
   useEffect(() => {
@@ -188,8 +219,8 @@ Presidente                  Secretario/a`;
             {r.acta ? "Acta redactada" : "Pendiente"}
           </Badge>
           {r.archivoAdjunto && (
-            <span title="Contiene documento o acta escaneada adjunta">
-              <Badge tone="primary">📎 Adjunto</Badge>
+            <span className={s.attachmentStatus} title="Contiene documento o acta escaneada adjunta" aria-label="Contiene adjunto">
+              <PaperclipIcon size={16} />
             </span>
           )}
         </div>
@@ -201,7 +232,7 @@ Presidente                  Secretario/a`;
       align: "center",
       render: (r) => (
         <IconButton
-          icon={r.acta ? <DocumentIcon /> : <EditIcon />}
+          icon={puedeAdministrar ? (r.acta ? <DocumentIcon /> : <EditIcon />) : <EyeIcon />}
           title={puedeAdministrar ? (r.acta ? "Ver / Editar acta" : "Redactar acta") : "Ver acta"}
           variant="primary"
           square
@@ -326,8 +357,8 @@ Presidente                  Secretario/a`;
       title="Reuniones › Libro de actas"
       action={
         <div style={{ display: "flex", gap: "var(--space-4)" }}>
-          <Button variant="secondary" onClick={() => window.print()}>
-            🖨️ Imprimir acta
+          <Button variant="secondary" onClick={imprimirActa} style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}>
+            <PrinterIcon size={16} /> Imprimir acta
           </Button>
           <Button variant="secondary" onClick={() => setVista("lista")}>
             ← Volver a reuniones

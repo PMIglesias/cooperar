@@ -14,6 +14,14 @@
   margin-bottom: var(--space-4);
 }
 
+.paymentsTable {
+  min-height: 0;
+  max-height: calc(100vh - 260px);
+  overflow-y: auto;
+  overflow-x: hidden;
+  border-radius: var(--radius-card);
+}
+
 .receiptBtn {
   background: none;
   border: none;
@@ -54,12 +62,152 @@
   margin-top: var(--space-2);
 }
 
+.attachmentName {
+  align-self: flex-end;
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--color-text-muted);
+  font-size: var(--fs-sm);
+  padding-bottom: 14px;
+}
+
+.detailOverlay {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-6);
+  background: rgba(15, 23, 42, .55);
+}
+
+.detailWorkspace {
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  gap: var(--space-4);
+  width: fit-content;
+  max-width: 95vw;
+  max-height: 90vh;
+}
+
+.detailWorkspace.withPreview { width: 1216px; }
+.detailWorkspace.withoutPreview { width: 760px; }
+
+.detailCard, .attachmentViewer, .attachmentPreview {
+  width: 760px;
+  flex: 0 0 760px;
+  max-height: 90vh;
+  overflow: auto;
+  background: var(--color-surface);
+  border-radius: var(--radius-card);
+  box-shadow: 0 20px 50px rgba(0, 0, 0, .2);
+}
+
+.detailHeader, .detailFooter {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  padding: var(--space-5) var(--space-6);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.detailHeader h2 {
+  margin: 0;
+  font-size: var(--fs-h3);
+}
+
+.detailClose {
+  border: 0;
+  background: transparent;
+  font-size: var(--fs-lg);
+  cursor: pointer;
+}
+
+.detailBody { padding: var(--space-6); }
+.detailStatus, .detailInline { display: flex; align-items: center; gap: var(--space-3); flex-wrap: wrap; }
+.detailInline { flex-direction: row !important; justify-content: flex-start; width: 100%; }
+.detailGrid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-5); margin-top: var(--space-5); }
+.detailGrid div, .detailDescription { display: flex; flex-direction: column; gap: 5px; }
+.detailGrid span, .detailDescription > span { color: var(--color-text-muted); font-size: var(--fs-sm); font-weight: 600; }
+.detailAmount { color: var(--color-ok); font-size: var(--fs-lg); }
+.detailDescription { margin-top: var(--space-6); }
+.detailDescription p { margin: 0; padding: var(--space-4); background: var(--color-th-bg); border: 1px solid var(--color-border); border-radius: var(--radius-sm); line-height: 1.5; }
+.detailFooter { justify-content: flex-end; border-top: 1px solid var(--color-border); border-bottom: 0; }
+.attachmentButton {
+  border: 1px solid var(--color-border);
+  background: var(--color-th-bg);
+  color: var(--color-primary);
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border-radius: var(--radius-sm);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.attachmentButton:hover { background: var(--color-primary-bg); }
+.attachmentViewer { height: 85vh; display: flex; flex-direction: column; }
+.attachmentViewer iframe, .attachmentViewer img { flex: 1; width: 100%; min-height: 0; border: 0; object-fit: contain; padding: var(--space-4); }
+.attachmentPreview { width: 440px; flex: 0 0 440px; height: 0; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
+.attachmentPreview iframe, .attachmentPreview img { flex: 1; width: 100%; min-height: 0; border: 0; object-fit: contain; padding: var(--space-4); }
+.detailAttachmentError { color: var(--color-danger); margin: var(--space-4) 0 0; }
+.detailAttachmentPrint { display: flex; flex-direction: column; gap: var(--space-2); margin-top: var(--space-6); }
+.detailAttachmentPrint > span { color: var(--color-text-muted); font-size: var(--fs-sm); font-weight: 600; }
+.detailAttachmentPrint img { max-width: 100%; max-height: 360px; object-fit: contain; border: 1px solid var(--color-border); border-radius: var(--radius-sm); }
+.detailAttachmentPrint object { width: 100%; height: 720px; border: 1px solid var(--color-border); }
+.printOption { display: flex; align-items: center; gap: var(--space-2); margin-top: var(--space-5); font-size: var(--fs-sm); color: var(--color-text); cursor: pointer; }
+
+@media (max-width: 900px) {
+  .detailWorkspace { flex-direction: column; overflow-y: auto; }
+  .detailWorkspace.withPreview, .detailWorkspace.withoutPreview { width: min(760px, 95vw); }
+  .detailCard, .attachmentPreview { width: min(760px, 95vw); flex-basis: auto; max-height: none; }
+  .attachmentPreview { height: 60vh; }
+}
+
 .errorMsg {
   color: var(--color-danger);
   font-size: var(--fs-base);
   background: var(--color-danger-bg);
   padding: var(--space-4);
   border-radius: var(--radius);
+}
+
+@media print {
+  body * {
+    visibility: hidden;
+  }
+
+  .printSection,
+  .printSection * {
+    visibility: visible;
+  }
+
+  .printSection {
+    position: fixed;
+    inset: 0;
+    width: 100%;
+    max-width: none;
+    max-height: none;
+    margin: 0;
+    overflow: visible;
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
+    background: #fff;
+  }
+
+  .noPrint {
+    display: none !important;
+  }
+
+  .detailBody {
+    overflow: visible;
+  }
 }
 
 /* Selector buscador de Asociado */

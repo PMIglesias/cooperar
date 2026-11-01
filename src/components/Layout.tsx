@@ -8,11 +8,21 @@ interface Props {
   title: string;
   action?: ReactNode;
   headerExtra?: ReactNode;
+  flushContentTop?: boolean;
+  hideContentOverflow?: boolean;
   footer?: ReactNode;
   children?: ReactNode;
 }
 
-export default function Layout({ title, action, headerExtra, footer, children }: Props) {
+export default function Layout({
+  title,
+  action,
+  headerExtra,
+  flushContentTop = false,
+  hideContentOverflow = false,
+  footer,
+  children,
+}: Props) {
   const { sidebarCollapsed } = useApp();
 
   return (
@@ -23,7 +33,7 @@ export default function Layout({ title, action, headerExtra, footer, children }:
           <h1 className={s.title}>{title}</h1>
           {action || headerExtra}
         </header>
-        <main className={s.content}>{children}</main>
+        <main className={`${s.content} ${flushContentTop ? s.contentFlushTop : ""} ${hideContentOverflow ? s.contentNoOverflow : ""}`}>{children}</main>
         {footer && <footer className={s.footer}>{footer}</footer>}
       </div>
     </div>

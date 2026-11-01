@@ -12,6 +12,7 @@ import Rendiciones from "./pages/Rendiciones";
 import Documentacion from "./pages/Documentacion";
 import ComisionDirectiva from "./pages/ComisionDirectiva";
 import Usuarios from "./pages/Usuarios";
+import Historial from "./pages/Historial";
 
 export default function App() {
   const [usuario, setUsuario] = useState<Usuario | null>(null);
@@ -54,7 +55,8 @@ export default function App() {
   else if (route === "rendiciones") page = <Rendiciones />;
   else if (route === "documentacion") page = <Documentacion />;
   else if (route === "comision") page = <ComisionDirectiva />;
-  else if (route === "usuarios" && usuario.rol === "Superadmin") page = <Usuarios />;
+  else if (route === "usuarios" && (usuario.rol === "Superadmin" || usuario.rol === "Asesor")) page = <Usuarios />;
+  else if (route === "historial" && usuario.rol === "Superadmin") page = <Historial />;
   else page = <Dashboard />;
 
   return (

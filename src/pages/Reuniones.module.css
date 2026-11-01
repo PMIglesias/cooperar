@@ -21,6 +21,12 @@
   text-decoration: underline;
 }
 
+.attachmentStatus {
+  display: inline-flex;
+  align-items: center;
+  color: var(--color-primary);
+}
+
 /* Pantalla Formulario */
 .formContainer {
   display: flex;

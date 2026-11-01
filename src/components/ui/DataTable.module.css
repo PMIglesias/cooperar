@@ -9,6 +9,12 @@
   width: 100%;
 }
 
+.tableWithStickyHeader {
+  max-height: none;
+  height: 100%;
+  overflow: auto;
+}
+
 .row {
   display: grid;
   grid-template-columns: var(--cols);
@@ -44,7 +50,15 @@
   border-bottom: 1.5px solid var(--color-border);
 }
 
+.stickyHead {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  box-shadow: 0 1px 0 var(--color-border);
+}
+
 .cell {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;

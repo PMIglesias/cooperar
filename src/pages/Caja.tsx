@@ -1,5 +1,5 @@
 // src/pages/Caja.tsx
-import { useEffect, useState, FormEvent } from "react";
+import { useEffect, useRef, useState, FormEvent } from "react";
 import { api, MovimientoCajaFila, ResumenCaja, money, signedMoney } from "../api";
 import Layout from "../components/Layout";
 import Button from "../components/ui/Button";
@@ -9,7 +9,7 @@ import DataTable, { Column } from "../components/ui/DataTable";
 import { Field, SelectField } from "../components/ui/Field";
 import ConfirmDialog from "../components/ui/ConfirmDialog";
 import IconButton from "../components/ui/IconButton";
-import { BanIcon, EyeIcon, PrinterIcon, PaperclipIcon } from "../components/icons";
+import { BanIcon, EyeIcon, PrinterIcon, PaperclipIcon, SearchIcon } from "../components/icons";
 import { useApp } from "../context";
 import s from "./Caja.module.css";
 
@@ -74,6 +74,9 @@ export default function Caja() {
   // Modal Ver Detalle Movimiento
   const [movimientoSeleccionado, setMovimientoSeleccionado] = useState<MovimientoCajaFila | null>(null);
   const [visorArchivo, setVisorArchivo] = useState<{ nombre: string; dataUrl: string } | null>(null);
+  const [imprimirAdjunto, setImprimirAdjunto] = useState(false);
+  const detalleRef = useRef<HTMLDivElement | null>(null);
+  const [detalleAltura, setDetalleAltura] = useState<number | null>(null);
 
   const cargarDatos = () => {
     setLoading(true);
@@ -165,12 +168,58 @@ export default function Caja() {
   };
 
   const abrirAdjunto = async (id: number) => {
+    if (visorArchivo) {
+      setVisorArchivo(null);
+      return;
+    }
     try {
       const adjunto = await api.obtenerAdjuntoMovimiento(id);
       if (adjunto) setVisorArchivo(adjunto);
     } catch (err) {
       console.error(err);
     }
+  };
+
+  useEffect(() => {
+    if (!movimientoSeleccionado || !detalleRef.current) return;
+    const actualizarAltura = () => {
+      if (detalleRef.current) setDetalleAltura(detalleRef.current.offsetHeight);
+    };
+    actualizarAltura();
+    const observer = new ResizeObserver(actualizarAltura);
+    observer.observe(detalleRef.current);
+    return () => observer.disconnect();
+  }, [movimientoSeleccionado, imprimirAdjunto]);
+
+  const imprimirDetalleMovimiento = async () => {
+    if (!movimientoSeleccionado) return;
+    let adjunto: { nombre: string; dataUrl: string } | null = null;
+    if (imprimirAdjunto && movimientoSeleccionado.adjuntoNombre) {
+      adjunto = await api.obtenerAdjuntoMovimiento(movimientoSeleccionado.id);
+    }
+    const escapar = (valor: string) => valor.replace(/[&<>"']/g, (c) => ({
+      "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
+    }[c] || c));
+    const adjuntoHtml = adjunto
+      ? adjunto.dataUrl.startsWith("data:image/")
+        ? `<div class="attachment"><h3>Comprobante adjunto</h3><img src="${adjunto.dataUrl}" alt="${escapar(adjunto.nombre)}"></div>`
+        : `<div class="attachment"><h3>Comprobante adjunto</h3><div class="pdf-note">${escapar(adjunto.nombre)} (archivo PDF adjunto)</div></div>`
+      : "";
+    const iframe = document.createElement("iframe");
+    Object.assign(iframe.style, { position: "fixed", width: "1px", height: "1px", border: "0", opacity: "0" });
+    document.body.appendChild(iframe);
+    iframe.contentDocument?.open();
+    iframe.contentDocument?.write(`<!doctype html><html lang="es"><head><meta charset="utf-8"><title>Detalle del movimiento</title>
+      <style>@page{size:A4 portrait;margin:10mm}*{box-sizing:border-box}body{font-family:Arial,sans-serif;color:#1f2937;margin:0}h1{font-size:20px;margin:0 0 14px}h3{font-size:14px;margin:14px 0 8px}.grid{display:grid;grid-template-columns:1fr 1fr;gap:10px 16px}.item span{display:block;color:#6b7280;font-size:12px;font-weight:600;margin-bottom:4px}.amount{font-size:18px;font-weight:700;color:${movimientoSeleccionado.tipo === "Ingreso" ? "#15803d" : "#b91c1c"}}.description{margin-top:16px;padding:10px;background:#f3f4f6;border:1px solid #d1d5db}.attachment{margin-top:14px;page-break-inside:avoid}.attachment img{display:block;max-width:100%;max-height:145mm;object-fit:contain}.pdf-note{padding:12px;border:1px solid #d1d5db}</style></head><body>
+      <h1>Detalle del Movimiento #${movimientoSeleccionado.id}</h1>
+      <div class="grid"><div class="item"><span>Tipo de Movimiento</span><strong>${escapar(movimientoSeleccionado.tipo)}</strong></div><div class="item"><span>Estado</span><strong>${movimientoSeleccionado.anulado ? "Anulado" : "Efectivo / Válido"}</strong></div><div class="item"><span>Fecha del Movimiento</span><strong>${escapar(movimientoSeleccionado.fecha)}</strong></div><div class="item"><span>Registrado por</span><strong>${escapar(movimientoSeleccionado.registradoPor || "—")}</strong></div><div class="item"><span>Monto Operado</span><strong class="amount">${escapar(signedMoney(movimientoSeleccionado.tipo, movimientoSeleccionado.monto))}</strong></div><div class="item"><span>Categoría</span><strong>${escapar(movimientoSeleccionado.categoria)}</strong></div><div class="item"><span>N° de Comprobante / Factura</span><strong>${escapar(movimientoSeleccionado.comprobante || "Sin comprobante asociado")}</strong></div></div>
+      <div class="description"><strong>Concepto / Descripción Detallada</strong><br>${escapar(movimientoSeleccionado.descripcion)}</div>${adjuntoHtml}</body></html>`);
+    iframe.contentDocument?.close();
+    setTimeout(() => {
+      iframe.contentWindow?.focus();
+      iframe.contentWindow?.print();
+      setTimeout(() => iframe.remove(), 1000);
+    }, 100);
   };
 
   const confirmarAnularMovimiento = async () => {
@@ -343,14 +392,20 @@ export default function Caja() {
           columns={columns}
           rows={movimientos}
           rowKey={(m) => m.id}
-          onRowClick={(m) => setMovimientoSeleccionado(m)}
+          onRowClick={(m) => {
+            setMovimientoSeleccionado(m);
+            setVisorArchivo(null);
+            setImprimirAdjunto(false);
+            setDetalleAltura(null);
+          }}
           emptyMessage={loading ? "Cargando movimientos de caja..." : "No se encontraron movimientos registrados."}
         />
 
         {/* Modal de Detalle de Movimiento de Caja */}
         {movimientoSeleccionado && (
           <div className={s.modalOverlay} onClick={() => setMovimientoSeleccionado(null)}>
-            <div className={`${s.modalCard} ${s.printSection}`} onClick={(e) => e.stopPropagation()}>
+            <div className={`${s.detailWorkspace} ${visorArchivo ? s.withPreview : s.withoutPreview}`} onClick={(e) => e.stopPropagation()}>
+            <div ref={detalleRef} className={s.modalCard} onClick={(e) => e.stopPropagation()}>
               <div className={s.modalHeader}>
                 <h3 className={s.modalTitle}>
                   Detalle del Movimiento #{movimientoSeleccionado.id}
@@ -439,11 +494,12 @@ export default function Caja() {
                       {movimientoSeleccionado.adjuntoNombre && (
                         <button
                           type="button"
-                          className={s.viewAttachBtn}
+                          className={`${s.viewAttachBtn} ${s.noPrint}`}
                           onClick={() => abrirAdjunto(movimientoSeleccionado.id)}
                           title="Ver comprobante adjunto"
+                          aria-label="Ver comprobante adjunto"
                         >
-                          <PaperclipIcon size={14} />
+                          <SearchIcon size={15} />
                         </button>
                       )}
                     </div>
@@ -467,12 +523,18 @@ export default function Caja() {
                     {movimientoSeleccionado.descripcion}
                   </div>
                 </div>
+                {movimientoSeleccionado.adjuntoNombre && (
+                  <label className={`${s.printOption} ${s.noPrint}`}>
+                    <input type="checkbox" checked={imprimirAdjunto} onChange={(e) => setImprimirAdjunto(e.target.checked)} />
+                    ¿Desea imprimir el comprobante junto al detalle?
+                  </label>
+                )}
               </div>
 
               <div className={`${s.modalFooter} ${s.noPrint}`}>
                 <Button
                   variant="secondary"
-                  onClick={() => window.print()}
+                  onClick={() => void imprimirDetalleMovimiento()}
                   style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}
                 >
                   <PrinterIcon size={16} />
@@ -495,69 +557,24 @@ export default function Caja() {
                 </Button>
               </div>
             </div>
+            {visorArchivo && (
+              <div className={s.attachmentPreview} style={detalleAltura ? { height: `${detalleAltura}px` } : undefined} onClick={() => setVisorArchivo(null)}>
+                <div className={s.modalHeader}>
+                  <h3 className={s.modalTitle}>{visorArchivo.nombre}</h3>
+                  <button type="button" className={s.modalClose} onClick={() => setVisorArchivo(null)}>✕</button>
+                </div>
+                {visorArchivo.dataUrl.startsWith("data:application/pdf") ? (
+                  <iframe src={visorArchivo.dataUrl} title={visorArchivo.nombre} />
+                ) : (
+                  <img src={visorArchivo.dataUrl} alt={visorArchivo.nombre} />
+                )}
+              </div>
+            )}
+            </div>
           </div>
         )}
 
         {/* Modal Visor de Comprobante / Archivo Adjunto */}
-        {visorArchivo && (
-          <div className={s.modalOverlay} onClick={() => setVisorArchivo(null)}>
-            <div
-              className={`${s.modalCard} ${s.printSection}`}
-              style={{ maxWidth: "800px", width: "95vw", height: "85vh" }}
-              onClick={(e) => e.stopPropagation()}
-            >
-              <div className={s.modalHeader}>
-                <h3 className={s.modalTitle} style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                  <PaperclipIcon size={18} />
-                  {visorArchivo.nombre}
-                </h3>
-                <button
-                  type="button"
-                  className={`${s.modalClose} ${s.noPrint}`}
-                  onClick={() => setVisorArchivo(null)}
-                >
-                  ✕
-                </button>
-              </div>
-              <div style={{ flex: 1, padding: "var(--space-4)", overflow: "hidden", display: "flex", justifyContent: "center", alignItems: "center", background: "#f8fafc" }}>
-                {visorArchivo.dataUrl.startsWith("data:application/pdf") ? (
-                  <iframe
-                    id="visor-comprobante-iframe"
-                    src={visorArchivo.dataUrl}
-                    title={visorArchivo.nombre}
-                    style={{ width: "100%", height: "100%", border: "none", borderRadius: "var(--radius-sm)" }}
-                  />
-                ) : (
-                  <img
-                    src={visorArchivo.dataUrl}
-                    alt={visorArchivo.nombre}
-                    style={{ maxWidth: "100%", maxHeight: "100%", objectFit: "contain", borderRadius: "var(--radius-sm)" }}
-                  />
-                )}
-              </div>
-              <div className={`${s.modalFooter} ${s.noPrint}`}>
-                <Button
-                  variant="secondary"
-                  onClick={() => {
-                    const iframe = document.getElementById("visor-comprobante-iframe") as HTMLIFrameElement | null;
-                    if (iframe && iframe.contentWindow) {
-                      iframe.contentWindow.print();
-                    } else {
-                      window.print();
-                    }
-                  }}
-                  style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}
-                >
-                  <PrinterIcon size={16} />
-                  Imprimir Comprobante
-                </Button>
-                <Button variant="primary" onClick={() => setVisorArchivo(null)}>
-                  Cerrar
-                </Button>
-              </div>
-            </div>
-          </div>
-        )}
 
         <ConfirmDialog
           isOpen={movimientoParaAnular !== null}

@@ -7,7 +7,8 @@ import Badge from "../components/ui/Badge";
 import DataTable, { Column } from "../components/ui/DataTable";
 import IconButton from "../components/ui/IconButton";
 import Modal from "../components/ui/Modal";
-import { EditIcon, TrashIcon } from "../components/icons";
+import ConfirmDialog from "../components/ui/ConfirmDialog";
+import { EditIcon, TrashIcon, SettingsIcon } from "../components/icons";
 import { Field, SelectField } from "../components/ui/Field";
 import { useApp } from "../context";
 import {
@@ -18,13 +19,6 @@ import {
   AsociadoFila,
 } from "../api";
 import s from "./ComisionDirectiva.module.css";
-
-const OPCIONES_VINCULO = [
-  { value: "NINGUNO", label: "Sin vinculación directa con la nómina" },
-  { value: "ASESOR", label: "Vinculado a: ASESOR (Fila 16 de Nómina)" },
-  { value: "REV_CTAS_DOC_TIT", label: "Vinculado a: REV. DE CUENTAS TITULAR DOCENTE (Fila 13)" },
-  { value: "REV_CTAS_DOC_SUP", label: "Vinculado a: REV. DE CUENTAS SUPLENTE DOCENTE (Fila 15)" },
-];
 
 export default function ComisionDirectiva() {
   const { usuario, setLogoCooperadora } = useApp();
@@ -43,6 +37,7 @@ export default function ComisionDirectiva() {
 
   // Modal para crear/editar personal del establecimiento
   const [personalEditando, setPersonalEditando] = useState<PersonalEstablecimientoFila | null>(null);
+  const [personalAEliminar, setPersonalAEliminar] = useState<PersonalEstablecimientoFila | null>(null);
 
   // Modal para ajuste y posicionamiento del Logo
   const [logoModalOpen, setLogoModalOpen] = useState(false);
@@ -54,6 +49,29 @@ export default function ComisionDirectiva() {
   const imgRef = useRef<HTMLImageElement>(null);
 
   const puedeEditar = usuario.rol === "Secretaria" || usuario.rol === "Superadmin";
+  const [columnasAutoridades, setColumnasAutoridades] = useState({
+    dni: true,
+    cuil: true,
+    domicilio: true,
+    telefono: true,
+    vencimiento: true,
+  });
+  const [configurarAutoridadesOpen, setConfigurarAutoridadesOpen] = useState(false);
+  const [busquedaVinculacion, setBusquedaVinculacion] = useState("");
+  const [tipoVinculacionSeleccionado, setTipoVinculacionSeleccionado] = useState("ASOCIADO");
+  const [vinculacionDropdownOpen, setVinculacionDropdownOpen] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  const fechaPredeterminadaEjercicio = `${new Date().getFullYear()}-12-31`;
+  const normalizarFecha = (valor: string) => {
+    if (/^\d{4}-\d{2}-\d{2}$/.test(valor)) return valor;
+    const partes = valor.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+    return partes ? `${partes[3]}-${partes[2]}-${partes[1]}` : fechaPredeterminadaEjercicio;
+  };
+  const prepararMiembroEdicion = (miembro: MiembroComisionFila) => ({
+    ...miembro,
+    vencimiento: normalizarFecha(miembro.vencimiento),
+  });
 
   const cargarDatos = async () => {
     try {
@@ -63,7 +81,7 @@ export default function ComisionDirectiva() {
         api.listarComisionDirectiva(),
         api.listarPersonalEstablecimiento(),
         api.obtenerDatosInstitucionales(),
-        api.listarAsociados({ busqueda: "", estadoCuotas: "todos", estado: "activo" }),
+        api.listarAsociados({ busqueda: "", estadoCuotas: "Todos", estado: "Activos" }),
       ]);
       setComision(com);
       setPersonal(pers);
@@ -79,6 +97,23 @@ export default function ComisionDirectiva() {
   useEffect(() => {
     cargarDatos();
   }, []);
+
+  useEffect(() => {
+    containerRef.current?.parentElement?.scrollTo({ top: 0 });
+  }, [activeTab]);
+
+  useEffect(() => {
+    if (!miembroEditando) return;
+    setTipoVinculacionSeleccionado(
+      miembroEditando.asociadoId
+        ? "ASOCIADO"
+        : miembroEditando.personalEstablecimientoId
+          ? "PERSONAL"
+          : "ASOCIADO"
+    );
+    setBusquedaVinculacion("");
+    setVinculacionDropdownOpen(false);
+  }, [miembroEditando?.id]);
 
   const handleGuardarMiembroModal = async (e: FormEvent) => {
     e.preventDefault();
@@ -119,13 +154,24 @@ export default function ComisionDirectiva() {
     }
   };
 
-  const handleEliminarPersonal = async (p: PersonalEstablecimientoFila) => {
-    if (!puedeEditar) return;
-    if (!confirm(`¿Desea eliminar a "${p.nombre}" del registro del establecimiento?`)) return;
+  const descripcionVinculoNomina = (vinculo: string) => {
+    if (vinculo.startsWith("AUTORIDAD:")) {
+      const autoridad = comision.find((item) => item.id === Number(vinculo.slice("AUTORIDAD:".length)));
+      return autoridad ? autoridad.cargo : "Autoridad vinculada";
+    }
+    if (vinculo === "ASESOR") return "Asesor";
+    if (vinculo === "REV_CTAS_DOC_TIT") return "REV. CTAS";
+    if (vinculo === "REV_CTAS_DOC_SUP") return "REV. CTAS (S)";
+    return "Sin vinculación";
+  };
+
+  const handleConfirmarEliminacionPersonal = async () => {
+    if (!personalAEliminar || !puedeEditar) return;
     try {
-      await api.eliminarPersonalEstablecimiento(p.id);
-      setPersonal((prev) => prev.filter((item) => item.id !== p.id));
-      setMensajeExito(`Personal "${p.nombre}" eliminado correctamente.`);
+      await api.eliminarPersonalEstablecimiento(personalAEliminar.id);
+      setPersonal((prev) => prev.filter((item) => item.id !== personalAEliminar.id));
+      setMensajeExito(`Personal "${personalAEliminar.nombre}" eliminado correctamente.`);
+      setPersonalAEliminar(null);
     } catch (err: any) {
       setError(err?.message || "Error al eliminar personal");
     }
@@ -284,25 +330,96 @@ export default function ComisionDirectiva() {
     }
   };
 
-  // Opciones para el selector de asociados en el modal
-  const opcionesAsociados = [
-    { value: "", label: "-- Ingreso manual / No vinculado --" },
-    ...asociados.map((a) => ({
-      value: String(a.id),
-      label: `${a.apellidoNombre} (DNI ${a.dni})`,
-    })),
+  const tipoVinculacionAutoridad = tipoVinculacionSeleccionado;
+
+  const opcionesTiposVinculacion = [
+    { value: "ASOCIADO", label: "Asociado cooperadora" },
+    { value: "PERSONAL", label: "Directivo/personal escolar" },
+    { value: "MANUAL", label: "Manual" },
   ];
+
+  const normalizarBusqueda = (valor: string) =>
+    valor
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toLocaleLowerCase()
+      .trim();
+  const textoBusqueda = normalizarBusqueda(busquedaVinculacion);
+  const asociadosVinculacion = asociados
+    .filter((a) => {
+      if (!textoBusqueda) return true;
+      return normalizarBusqueda(`${a.apellidoNombre} ${a.dni} ${a.id}`).includes(textoBusqueda);
+    })
+    .slice(0, 8);
+
+  const personalVinculacion = personal
+    .filter((p) => {
+      if (!textoBusqueda) return true;
+      return normalizarBusqueda(`${p.nombre} ${p.cargo} ${p.dni} ${p.id}`).includes(textoBusqueda);
+    })
+    .slice(0, 8);
+
+  const seleccionarOrigenAutoridad = async (valor: string) => {
+    if (!miembroEditando) return;
+    if (valor.startsWith("ASOCIADO:")) {
+      await handleSeleccionarAsociado(valor.slice("ASOCIADO:".length));
+      setMiembroEditando((actual) => actual ? {
+        ...actual,
+        personalEstablecimientoId: null,
+      } : actual);
+      return;
+    }
+    if (valor.startsWith("PERSONAL:")) {
+      const personalId = Number(valor.slice("PERSONAL:".length));
+      const persona = personal.find((item) => item.id === personalId);
+      if (!persona) return;
+      setMiembroEditando({
+        ...miembroEditando,
+        asociadoId: null,
+        personalEstablecimientoId: personalId,
+        nombre: persona.nombre,
+        dni: persona.dni,
+        telefono: persona.telefono,
+        email: persona.email,
+      });
+      return;
+    }
+    setMiembroEditando({ ...miembroEditando, asociadoId: null, personalEstablecimientoId: null });
+  };
+
+  const seleccionarResultadoVinculo = async (valor: string, etiqueta: string) => {
+    await seleccionarOrigenAutoridad(valor);
+    setBusquedaVinculacion(etiqueta);
+    setVinculacionDropdownOpen(false);
+  };
+
+  const cambiarBusquedaVinculacion = (valor: string) => {
+    setBusquedaVinculacion(valor);
+    setVinculacionDropdownOpen(true);
+  };
+
+  const cambiarTipoVinculacion = (tipo: string) => {
+    if (!miembroEditando) return;
+    setTipoVinculacionSeleccionado(tipo);
+    setBusquedaVinculacion("");
+    setVinculacionDropdownOpen(false);
+    setMiembroEditando({
+      ...miembroEditando,
+      asociadoId: null,
+      personalEstablecimientoId: null,
+    });
+  };
+
+  const formatearPeriodo = (valor: string) => {
+    const anios = [...new Set(valor.match(/\d{4}/g) || [])];
+    return anios.length > 0 ? anios.map((anio) => anio.slice(-2)).join(" | ") : valor;
+  };
 
   // Definición de columnas con DataTable nativo de la app
   const columns: Column<MiembroComisionFila>[] = [
     {
-      header: "N°",
-      width: 50,
-      render: (m) => <span style={{ color: "var(--color-text-muted)", fontWeight: 600 }}>{m.orden}°</span>,
-    },
-    {
       header: "Cargo",
-      minWidth: 160,
+      minWidth: 180,
       flex: true,
       render: (m) => (
         <span style={{ fontWeight: 600, color: "var(--color-primary)" }}>
@@ -312,50 +429,60 @@ export default function ComisionDirectiva() {
     },
     {
       header: "Apellido y Nombre",
-      minWidth: 200,
+      minWidth: 205,
       flex: true,
       render: (m) => (
         <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: "4px" }}>
           <strong>{m.nombre}</strong>
-          {m.asociadoId ? <span className={s.asociadoBadge}>Socio en BD</span> : null}
         </div>
       ),
     },
     {
+      header: "Asociado",
+      minWidth: 86,
+      flex: true,
+      align: "center",
+      render: (m) => (
+        <Badge tone={m.asociadoId ? "ok" : "info"}>
+          {m.asociadoId ? "Sí" : "No"}
+        </Badge>
+      ),
+    },
+    {
       header: "DNI",
-      minWidth: 105,
+      minWidth: 90,
       flex: true,
       render: (m) => m.dni,
     },
     {
       header: "CUIL",
-      minWidth: 125,
+      minWidth: 130,
       flex: true,
       render: (m) => m.cuil,
     },
     {
       header: "Domicilio / Localidad",
-      minWidth: 210,
+      minWidth: 220,
       flex: true,
       render: (m) => (m.domicilio ? `${m.domicilio}, ${m.localidad}` : m.localidad),
     },
     {
       header: "Teléfono",
-      minWidth: 120,
+      minWidth: 125,
       flex: true,
       render: (m) => m.telefono || "—",
     },
     {
-      header: "Vencimiento",
-      minWidth: 110,
+      header: "Período",
+      minWidth: 82,
       flex: true,
-      render: (m) => <Badge tone="warn">{m.vencimiento}</Badge>,
+      render: (m) => <Badge tone="warn">{formatearPeriodo(m.vencimiento)}</Badge>,
     },
     ...(puedeEditar
       ? [
           {
             header: "Acciones",
-            width: 85,
+            width: 72,
             align: "center" as const,
             render: (m: MiembroComisionFila) => (
               <IconButton
@@ -364,7 +491,7 @@ export default function ComisionDirectiva() {
                 title={`Editar autoridad: ${m.cargo}`}
                 onClick={(e) => {
                   e.stopPropagation();
-                  setMiembroEditando({ ...m });
+                  setMiembroEditando(prepararMiembroEdicion(m));
                 }}
               />
             ),
@@ -372,64 +499,69 @@ export default function ComisionDirectiva() {
         ]
       : []),
   ];
+  const columnasAutoridadesVisibles = columns.filter((column) => {
+    if (column.header === "DNI") return columnasAutoridades.dni;
+    if (column.header === "CUIL") return columnasAutoridades.cuil;
+    if (column.header === "Domicilio / Localidad") return columnasAutoridades.domicilio;
+    if (column.header === "Teléfono") return columnasAutoridades.telefono;
+    if (column.header === "Período") return columnasAutoridades.vencimiento;
+    return true;
+  });
 
   // Columnas para la tabla de Personal del Establecimiento
   const columnsPersonal: Column<PersonalEstablecimientoFila>[] = [
     {
       header: "Cargo Escolar",
-      minWidth: 160,
+      minWidth: 115,
       flex: true,
       render: (p) => <strong>{p.cargo}</strong>,
     },
     {
       header: "Nombre y Apellido",
-      minWidth: 180,
+      minWidth: 160,
       flex: true,
       render: (p) => <span>{p.nombre}</span>,
     },
     {
       header: "DNI",
-      minWidth: 110,
-      flex: true,
+      width: 88,
       render: (p) => <code>{p.dni}</code>,
     },
     {
       header: "Teléfono",
-      minWidth: 120,
-      flex: true,
+      width: 128,
       render: (p) => p.telefono || "—",
     },
     {
       header: "Email",
-      minWidth: 170,
+      minWidth: 150,
       flex: true,
       render: (p) => p.email || "—",
     },
     {
-      header: "Vínculo con Nómina Oficial",
-      minWidth: 200,
+      header: "Cargo Nómina",
+      minWidth: 180,
       flex: true,
       render: (p) => {
-        if (p.vinculoNomina === "ASESOR") {
-          return <span className={s.vinculoBadge}>Asesor Escolar (Fila 16)</span>;
-        }
-        if (p.vinculoNomina === "REV_CTAS_DOC_TIT") {
-          return <span className={s.vinculoBadge}>Rev. Cuentas Docente Tit. (Fila 13)</span>;
-        }
-        if (p.vinculoNomina === "REV_CTAS_DOC_SUP") {
-          return <span className={s.vinculoBadge}>Rev. Cuentas Docente Sup. (Fila 15)</span>;
-        }
-        return <span className={s.sinVinculoBadge}>Sin vinculación</span>;
+        const vinculada = p.vinculoNomina !== "NINGUNO";
+        return (
+          <span
+            className={vinculada ? s.vinculoBadge : s.sinVinculoBadge}
+            title={descripcionVinculoNomina(p.vinculoNomina)}
+          >
+            {descripcionVinculoNomina(p.vinculoNomina)}
+          </span>
+        );
       },
     },
     ...(puedeEditar
       ? [
           {
             header: "Acciones",
-            width: 90,
+            width: 72,
             align: "center" as const,
             render: (p: PersonalEstablecimientoFila) => (
-              <div style={{ display: "flex", gap: "6px", alignItems: "center", justifyContent: "center" }}>
+              <div style={{ display: "flex", gap: "6px", alignItems: "center", justifyContent: "center", width: "100%" }}>
                 <IconButton
                   icon={<EditIcon size={16} />}
                   variant="primary"
@@ -445,7 +577,7 @@ export default function ComisionDirectiva() {
                   title={`Eliminar a ${p.nombre}`}
                   onClick={(e) => {
                     e.stopPropagation();
-                    handleEliminarPersonal(p);
+                    setPersonalAEliminar(p);
                   }}
                 />
               </div>
@@ -456,13 +588,18 @@ export default function ComisionDirectiva() {
   ];
 
   return (
-    <Layout title="Comisión Directiva e Institución">
-      <div className={s.container}>
+    <Layout
+      title="Comisión Directiva e Institución"
+      flushContentTop
+      hideContentOverflow={activeTab === "autoridades"}
+    >
+      <div ref={containerRef} className={`${s.container} ${activeTab === "autoridades" ? s.authoritiesContainer : ""}`}>
         {mensajeExito && <div className="alert alert-success">{mensajeExito}</div>}
         {error && <div className="alert alert-error">{error}</div>}
 
         {/* Pestañas de Navegación: Separación de Autoridades, Establecimiento y Cooperadora */}
         <div className={s.tabNav}>
+          <div className={s.tabsGroup}>
           <button
             type="button"
             className={`${s.tabBtn} ${activeTab === "autoridades" ? s.tabBtnActive : ""}`}
@@ -493,29 +630,61 @@ export default function ComisionDirectiva() {
           >
             🏛️ Asociación Cooperadora
           </button>
+          </div>
+          {activeTab === "autoridades" && (
+            <IconButton
+              icon={<SettingsIcon size={20} />}
+              title="Configurar columnas de autoridades"
+              onClick={() => setConfigurarAutoridadesOpen(true)}
+            />
+          )}
         </div>
 
         {/* TAB 1: AUTORIDADES DE LA COMISIÓN DIRECTIVA */}
         {activeTab === "autoridades" && (
           <>
-            <p className={s.summary}>
-              {comision.length} integrantes y autoridades oficiales registradas para el ejercicio anual.
-              {!puedeEditar && " (Modo sólo lectura para su rol)"}
-            </p>
-
-            <DataTable
-              columns={columns}
-              rows={comision}
-              rowKey={(m) => m.id}
-              emptyMessage={loading ? "Cargando autoridades..." : "No se encontraron integrantes registrados."}
-              onRowClick={puedeEditar ? (m) => setMiembroEditando({ ...m }) : undefined}
-            />
+            <div className={s.tablePanel}>
+              <DataTable
+                columns={columnasAutoridadesVisibles}
+                rows={comision}
+                stickyHeader
+                rowKey={(m) => m.id}
+                emptyMessage={loading ? "Cargando autoridades..." : "No se encontraron integrantes registrados."}
+                onRowClick={puedeEditar ? (m) => setMiembroEditando(prepararMiembroEdicion(m)) : undefined}
+              />
+            </div>
+            <Modal
+              isOpen={configurarAutoridadesOpen}
+              onClose={() => setConfigurarAutoridadesOpen(false)}
+              title="Configurar vista de autoridades"
+              size="medium"
+              footer={<Button variant="primary" onClick={() => setConfigurarAutoridadesOpen(false)}>Aplicar configuración</Button>}
+            >
+              <div style={{ display: "grid", gap: "var(--space-3)" }}>
+                {([
+                  ["dni", "DNI"],
+                  ["cuil", "CUIL"],
+                  ["domicilio", "Domicilio y localidad"],
+                  ["telefono", "Teléfono"],
+                  ["vencimiento", "Período"],
+                ] as const).map(([key, label]) => (
+                  <label key={key} style={{ display: "flex", gap: "var(--space-3)", alignItems: "center" }}>
+                    <input
+                      type="checkbox"
+                      checked={columnasAutoridades[key]}
+                      onChange={(e) => setColumnasAutoridades({ ...columnasAutoridades, [key]: e.target.checked })}
+                    />
+                    {label}
+                  </label>
+                ))}
+              </div>
+            </Modal>
           </>
         )}
 
         {/* TAB 2: ESTABLECIMIENTO EDUCATIVO Y EQUIPO DIRECTIVO / DOCENTE */}
         {activeTab === "establecimiento" && institucion && (
-          <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-6)" }}>
+          <div className={s.establishmentPanel} style={{ display: "flex", flexDirection: "column", gap: "var(--space-6)" }}>
             <form onSubmit={handleGuardarInstitucion}>
               <Card title="Datos del Establecimiento Escolar">
                 <div className={s.configGrid}>
@@ -601,7 +770,7 @@ export default function ComisionDirectiva() {
               </Card>
             </form>
 
-            <Card title="Equipo Directivo, Secretarios y Docentes">
+            <Card title="Equipo Directivo, Secretarios y Docentes" className={s.teamCard}>
               <div className={s.sectionTopBar}>
                 <p className={s.summary}>
                   Personal del establecimiento registrado. Los cargos vinculados se sincronizan automáticamente con la Nómina Oficial de la Asamblea y Comisión Directiva.
@@ -629,6 +798,7 @@ export default function ComisionDirectiva() {
               <DataTable
                 columns={columnsPersonal}
                 rows={personal}
+                stickyHeader
                 rowKey={(p) => p.id}
                 emptyMessage={loading ? "Cargando personal..." : "No hay personal registrado en el establecimiento."}
               />
@@ -638,7 +808,7 @@ export default function ComisionDirectiva() {
 
         {/* TAB 3: ASOCIACIÓN COOPERADORA Y CUENTAS BANCARIAS */}
         {activeTab === "cooperadora" && institucion && (
-          <form onSubmit={handleGuardarInstitucion}>
+          <form className={s.cooperadoraPanel} onSubmit={handleGuardarInstitucion}>
             <Card title="Identidad y Logo de la Asociación Cooperadora">
               <div className={s.logoSection}>
                 <div className={s.logoPreviewWrapper}>
@@ -844,12 +1014,71 @@ export default function ComisionDirectiva() {
             <form onSubmit={handleGuardarMiembroModal}>
               <div className={s.modalBody}>
                 <SelectField
-                  label="Vincular con Asociado del padrón:"
-                  value={miembroEditando.asociadoId ? String(miembroEditando.asociadoId) : ""}
-                  options={opcionesAsociados}
-                  onChange={handleSeleccionarAsociado}
+                  label="Vinculación de la autoridad"
+                  value={tipoVinculacionAutoridad}
+                  options={opcionesTiposVinculacion}
+                  onChange={cambiarTipoVinculacion}
                   width="100%"
                 />
+                {tipoVinculacionAutoridad !== "MANUAL" && (
+                  <>
+                    <div className={s.autocomplete}>
+                      <Field
+                        label={
+                          tipoVinculacionAutoridad === "ASOCIADO"
+                            ? "Buscar asociado cooperadora"
+                            : "Buscar integrante de la nómina directiva"
+                        }
+                        placeholder="Nombre, cargo, DNI o número de socio"
+                        value={busquedaVinculacion}
+                        onChange={(e) => {
+                          void cambiarBusquedaVinculacion(e.target.value);
+                          setVinculacionDropdownOpen(true);
+                        }}
+                        onFocus={() => {
+                          setVinculacionDropdownOpen(true);
+                          setBusquedaVinculacion((valor) => valor.trim());
+                        }}
+                        width="100%"
+                      />
+                      {vinculacionDropdownOpen && (
+                        <div className={s.autocompleteMenu} role="listbox">
+                          {tipoVinculacionAutoridad === "ASOCIADO"
+                            ? asociadosVinculacion.map((item) => {
+                              const etiqueta = `Socio N° ${item.id} · ${item.apellidoNombre} (DNI ${item.dni})`;
+                              return (
+                                <button
+                                  key={`ASOCIADO:${item.id}`}
+                                  type="button"
+                                  className={s.autocompleteOption}
+                                  onMouseDown={(e) => e.preventDefault()}
+                                  onClick={() => void seleccionarResultadoVinculo(`ASOCIADO:${item.id}`, etiqueta)}
+                                >
+                                  <strong>{item.apellidoNombre}</strong>
+                                  <span>Socio N° {item.id} · DNI {item.dni}</span>
+                                </button>
+                              );
+                            })
+                            : personalVinculacion.map((item) => (
+                              <button
+                                key={`PERSONAL:${item.id}`}
+                                type="button"
+                                className={s.autocompleteOption}
+                                onMouseDown={(e) => e.preventDefault()}
+                                onClick={() => void seleccionarResultadoVinculo(`PERSONAL:${item.id}`, `${item.nombre} — ${item.cargo}`)}
+                              >
+                                <strong>{item.nombre}</strong>
+                                <span>{item.cargo} · DNI {item.dni}</span>
+                              </button>
+                            ))}
+                          {(tipoVinculacionAutoridad === "ASOCIADO" ? asociadosVinculacion : personalVinculacion).length === 0 && (
+                            <span className={s.autocompleteEmpty}>No se encontraron integrantes.</span>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  </>
+                )}
 
                 <Field
                   label="Apellido y Nombre:"
@@ -909,6 +1138,7 @@ export default function ComisionDirectiva() {
                   />
                   <Field
                     label="Vencimiento Mandato:"
+                    type="date"
                     value={miembroEditando.vencimiento}
                     onChange={(e) =>
                       setMiembroEditando({ ...miembroEditando, vencimiento: e.target.value })
@@ -1001,18 +1231,15 @@ export default function ComisionDirectiva() {
                   />
                 </div>
 
-                <SelectField
-                  label="Vincular con la Nómina Oficial de Comisión Directiva:"
-                  value={personalEditando.vinculoNomina}
-                  options={OPCIONES_VINCULO}
-                  onChange={(val) =>
-                    setPersonalEditando({ ...personalEditando, vinculoNomina: val })
-                  }
-                  width="100%"
-                />
-                <span style={{ fontSize: "var(--fs-xs)", color: "var(--color-text-muted)" }}>
-                  💡 Si vinculas este integrante, sus datos actualizarán en tiempo real la fila correspondiente en la Nómina Oficial (Asesor, Revisor de Cuentas Docente Titular o Suplente).
-                </span>
+                <div className={s.nominaStatus}>
+                  <span className={s.nominaStatusLabel}>Estado en Nómina Oficial</span>
+                  <span className={personalEditando.vinculoNomina === "NINGUNO" ? s.sinVinculoBadge : s.vinculoBadge}>
+                    {descripcionVinculoNomina(personalEditando.vinculoNomina)}
+                  </span>
+                  <span className={s.nominaStatusHelp}>
+                    La vinculación se consulta desde aquí y sólo puede modificarse en la Nómina de Autoridades.
+                  </span>
+                </div>
               </div>
 
               <div className={s.modalFooter}>
@@ -1030,6 +1257,19 @@ export default function ComisionDirectiva() {
           </div>
         </div>
       )}
+
+      <ConfirmDialog
+        isOpen={personalAEliminar !== null}
+        title="Eliminar integrante del establecimiento"
+        message={
+          personalAEliminar
+            ? `¿Desea eliminar a "${personalAEliminar.nombre}" del registro del establecimiento?`
+            : ""
+        }
+        confirmLabel="Eliminar integrante"
+        onConfirm={() => void handleConfirmarEliminacionPersonal()}
+        onCancel={() => setPersonalAEliminar(null)}
+      />
 
       {/* MODAL PARA ENCUADRAR Y POSICIONAR EL LOGO */}
       {logoModalOpen && (

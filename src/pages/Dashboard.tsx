@@ -1,20 +1,34 @@
 // src/pages/Dashboard.tsx
 import { useEffect, useState } from "react";
-import { api, money, signedMoney, ResumenInicio } from "../api";
+import { api, money, signedMoney, ResumenInicio, AuditoriaFila } from "../api";
 import { useApp } from "../context";
 import Layout from "../components/Layout";
 import Card from "../components/ui/Card";
 import Button from "../components/ui/Button";
+import DataTable, { Column } from "../components/ui/DataTable";
 import s from "./Dashboard.module.css";
+import { descripcionAuditoria } from "./Historial";
 
 export default function Dashboard() {
   const { usuario, navigate } = useApp();
   const [r, setR] = useState<ResumenInicio | null>(null);
   const [respaldando, setRespaldando] = useState(false);
   const [mensajeRespaldo, setMensajeRespaldo] = useState<string | null>(null);
+  const [auditoria, setAuditoria] = useState<AuditoriaFila[]>([]);
 
   const cargar = () => { api.resumenInicio().then(setR).catch(console.error); };
-  useEffect(cargar, []);
+  useEffect(() => {
+    cargar();
+    if (usuario.rol === "Superadmin") {
+      api.listarAuditoria().then(setAuditoria).catch(console.error);
+    }
+  }, [usuario.rol]);
+
+  const columnasAuditoria: Column<AuditoriaFila>[] = [
+    { header: "Fecha y hora", minWidth: 155, flex: true, render: (e) => e.fechaHora },
+    { header: "Usuario", minWidth: 170, flex: true, render: (e) => e.usuario },
+    { header: "Qué pasó", minWidth: 260, flex: true, render: descripcionAuditoria },
+  ];
 
   // HU09: la Presidencia respalda en un clic desde el inicio (no tiene acceso a Usuarios y respaldo)
   const crearCopia = async () => {
@@ -67,28 +81,59 @@ export default function Dashboard() {
         </Card>
         <div className={s.actions}>
           <h2 className={s.actionsTitle}>Acciones rápidas</h2>
-          {(usuario.rol === "Tesorero" || usuario.rol === "Superadmin") && (
+          {usuario.rol === "Tesorero" && (
             <>
               <Button block onClick={() => navigate("cuotas")}>Registrar pago de cuota</Button>
               <Button block variant="secondary" onClick={() => navigate("caja")}>Nuevo movimiento de caja</Button>
             </>
           )}
-          {(usuario.rol === "Secretaria" || usuario.rol === "Presidente" || usuario.rol === "Superadmin") && (
+          {usuario.rol === "Secretaria" && (
             <Button block variant="secondary" onClick={() => navigate("asociados")}>Nuevo asociado</Button>
           )}
-          {usuario.rol === "Superadmin" && (
-            <Button block variant="secondary" onClick={() => navigate("usuarios")}>Copia de seguridad</Button>
+          {usuario.rol === "Secretaria" && (
+            <>
+              <Button block variant="secondary" onClick={() => navigate("reuniones")}>Gestionar reuniones y actas</Button>
+              <Button block variant="secondary" onClick={() => navigate("documentacion")}>Gestionar documentación</Button>
+            </>
           )}
           {usuario.rol === "Presidente" && (
             <>
-              <Button block variant="secondary" onClick={crearCopia} disabled={respaldando}>
-                {respaldando ? "Creando copia…" : "Copia de seguridad"}
-              </Button>
-              {mensajeRespaldo && <p className={s.actionsTitle} style={{ fontWeight: 400 }}>{mensajeRespaldo}</p>}
+              <Button block variant="secondary" onClick={() => navigate("reuniones")}>Programar reunión</Button>
+              <Button block variant="secondary" onClick={() => navigate("documentacion")}>Documentación de Asambleas</Button>
+              <Button block variant="secondary" onClick={() => navigate("rendiciones")}>Revisar rendiciones</Button>
+            </>
+          )}
+          {usuario.rol === "Tesorero" && (
+            <Button block variant="secondary" onClick={() => navigate("rendiciones")}>Gestionar rendiciones</Button>
+          )}
+          {usuario.rol === "Superadmin" && (
+            <>
+              <Button block variant="secondary" onClick={() => navigate("usuarios")}>Usuarios y respaldo</Button>
+              <Button block variant="secondary" onClick={() => navigate("historial")}>Historial de cambios</Button>
+            </>
+          )}
+          {usuario.rol === "Asesor" && (
+            <>
+              <Button block variant="secondary" onClick={() => navigate("asociados")}>Consultar asociados</Button>
+              <Button block variant="secondary" onClick={() => navigate("comision")}>Consultar comisión e institución</Button>
+              <Button block variant="secondary" onClick={() => navigate("caja")}>Consultar caja</Button>
+              <Button block variant="secondary" onClick={() => navigate("rendiciones")}>Consultar rendiciones</Button>
+              <Button block variant="secondary" onClick={() => navigate("reuniones")}>Consultar reuniones y actas</Button>
             </>
           )}
         </div>
       </div>
+      {usuario.rol === "Superadmin" && (
+        <Card title="Resumen del historial de cambios">
+          <DataTable
+            columns={columnasAuditoria}
+            rows={auditoria.slice(0, 5)}
+            rowKey={(e) => e.id}
+            emptyMessage="No hay cambios registrados."
+          />
+        </Card>
+      )}
+
     </Layout>
   );
 }

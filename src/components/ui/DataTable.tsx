@@ -19,6 +19,7 @@ interface Props<T> {
   rowKey?: (row: T) => string | number;
   rightPad?: number;
   onRowClick?: (row: T) => void;
+  stickyHeader?: boolean;
   emptyMessage?: string;
 }
 
@@ -29,6 +30,7 @@ export default function DataTable<T>({
   rowKey,
   rightPad = 16,
   onRowClick,
+  stickyHeader = false,
   emptyMessage = "No se encontraron resultados",
 }: Props<T>) {
   const items = data || rows || [];
@@ -61,8 +63,8 @@ export default function DataTable<T>({
   const getKey = rowKey || defaultGetKey;
 
   return (
-    <div className={s.table} style={style} role="table">
-      <div className={`${s.row} ${s.head}`} role="row">
+    <div className={`${s.table} ${stickyHeader ? s.tableWithStickyHeader : ""}`} style={style} role="table">
+      <div className={`${s.row} ${s.head} ${stickyHeader ? s.stickyHead : ""}`} role="row">
         {columns.map((c, i) => (
           <div
             key={i}

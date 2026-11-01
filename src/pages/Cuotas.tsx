@@ -1,5 +1,5 @@
-import { useEffect, useState, FormEvent } from "react";
-import { api, PagoFila, AsociadoFila, money } from "../api";
+import { useEffect, useRef, useState, FormEvent } from "react";
+import { api, PagoFila, AsociadoFila, AdjuntoMovimiento, money } from "../api";
 import { useApp } from "../context";
 import Layout from "../components/Layout";
 import Button from "../components/ui/Button";
@@ -8,19 +8,19 @@ import Badge from "../components/ui/Badge";
 import DataTable, { Column } from "../components/ui/DataTable";
 import { Field, SelectField } from "../components/ui/Field";
 import IconButton from "../components/ui/IconButton";
-import { ReceiptIcon } from "../components/icons";
+import { PaperclipIcon, PrinterIcon, ReceiptIcon, SearchIcon } from "../components/icons";
 import s from "./Cuotas.module.css";
 
 const PERIODOS_FILTRO = [
-  "Todos",
-  "2026-10",
-  "2026-09",
-  "2026-08",
-  "2026-07",
-  "2026-06",
-  "2026-05",
-  "2026-04",
-  "2026-03",
+  { value: "Todos", label: "Todos los períodos" },
+  { value: "2026-10", label: "Octubre 2026" },
+  { value: "2026-09", label: "Septiembre 2026" },
+  { value: "2026-08", label: "Agosto 2026" },
+  { value: "2026-07", label: "Julio 2026" },
+  { value: "2026-06", label: "Junio 2026" },
+  { value: "2026-05", label: "Mayo 2026" },
+  { value: "2026-04", label: "Abril 2026" },
+  { value: "2026-03", label: "Marzo 2026" },
 ];
 
 const MEDIOS_PAGO = [
@@ -50,11 +50,20 @@ export default function Cuotas() {
   const [pagoMonto, setPagoMonto] = useState("3000");
   const [pagoMedio, setPagoMedio] = useState("Efectivo");
   const [pagoComprobante, setPagoComprobante] = useState("");
+  const [pagoAdjuntoNombre, setPagoAdjuntoNombre] = useState<string | null>(null);
+  const [pagoAdjuntoDatos, setPagoAdjuntoDatos] = useState<string | null>(null);
   const [pagoSaving, setPagoSaving] = useState(false);
   const [pagoError, setPagoError] = useState<string | null>(null);
 
   // Pantalla Ver Recibo
   const [reciboSeleccionado, setReciboSeleccionado] = useState<PagoFila | null>(null);
+  const [pagoDetalle, setPagoDetalle] = useState<PagoFila | null>(null);
+  const [visorAdjunto, setVisorAdjunto] = useState<AdjuntoMovimiento | null>(null);
+  const [detalleAdjunto, setDetalleAdjunto] = useState<AdjuntoMovimiento | null>(null);
+  const [detalleAdjuntoError, setDetalleAdjuntoError] = useState<string | null>(null);
+  const [imprimirComprobante, setImprimirComprobante] = useState(false);
+  const detalleCardRef = useRef<HTMLDivElement | null>(null);
+  const [detalleAltura, setDetalleAltura] = useState<number | null>(null);
 
   const cargarPagos = () => {
     setLoading(true);
@@ -85,6 +94,8 @@ export default function Cuotas() {
     setPagoPeriodo(new Date().toISOString().slice(0, 7));
     setPagoMedio("Efectivo");
     setPagoComprobante(`REC-${Math.floor(1000 + Math.random() * 9000)}`);
+    setPagoAdjuntoNombre(null);
+    setPagoAdjuntoDatos(null);
     setPagoError(null);
     setVista("nuevo");
   };
@@ -110,6 +121,8 @@ export default function Cuotas() {
         monto: montoNum,
         medio: pagoMedio,
         comprobante: pagoComprobante.trim() || undefined,
+        adjuntoNombre: pagoAdjuntoNombre || undefined,
+        adjuntoDatos: pagoAdjuntoDatos || undefined,
       });
 
       const asociado = asociados.find((a) => a.id === Number(asociadoId));
@@ -137,39 +150,193 @@ export default function Cuotas() {
     }
   };
 
-  const totalRecaudado = pagos.reduce((acc, p) => acc + p.monto, 0);
+  const imprimirListadoPagos = () => {
+    const escapar = (valor: string) => valor.replace(/[&<>"']/g, (caracter) => ({
+      "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
+    }[caracter] || caracter));
+    const filas = pagos.map((p) => `
+      <tr>
+        <td>${escapar(p.fechaPago)}</td>
+        <td>${escapar(p.comprobante || `REC-${p.id}`)}</td>
+        <td>${escapar(p.apellidoNombre)}</td>
+        <td>${escapar(p.dni)}</td>
+        <td>${escapar(p.periodo)}</td>
+        <td>${escapar(p.medio)}</td>
+        <td>${escapar(money(p.monto))}</td>
+      </tr>`).join("");
+    const iframe = document.createElement("iframe");
+    iframe.style.position = "fixed";
+    iframe.style.width = "1px";
+    iframe.style.height = "1px";
+    iframe.style.border = "0";
+    iframe.style.opacity = "0";
+    document.body.appendChild(iframe);
+    iframe.contentDocument?.open();
+    iframe.contentDocument?.write(`
+      <!doctype html>
+      <html lang="es">
+        <head>
+          <meta charset="utf-8">
+          <title>Listado de pagos</title>
+          <style>
+            body { font-family: Arial, sans-serif; color: #1f2937; padding: 24px; }
+            h1 { margin: 0 0 6px; font-size: 22px; }
+            p { margin: 0 0 18px; color: #6b7280; }
+            table { width: 100%; border-collapse: collapse; font-size: 12px; }
+            th, td { border: 1px solid #d1d5db; padding: 8px; text-align: left; }
+            th { background: #f3f4f6; }
+            @media print { body { padding: 0; } }
+          </style>
+        </head>
+        <body>
+          <h1>Listado de pagos</h1>
+          <p>Filtro: ${periodo === "Todos" ? "Todos los períodos" : periodo}</p>
+          <table>
+            <thead><tr><th>Fecha</th><th>Comprobante</th><th>Asociado</th><th>DNI</th><th>Período</th><th>Medio</th><th>Monto</th></tr></thead>
+            <tbody>${filas}</tbody>
+          </table>
+        </body>
+      </html>`);
+    iframe.contentDocument?.close();
+    setTimeout(() => {
+      iframe.contentWindow?.focus();
+      iframe.contentWindow?.print();
+      setTimeout(() => iframe.remove(), 1000);
+    }, 100);
+  };
+
+  const cargarAdjuntoPago = async (pago: PagoFila) => {
+    if (!pago.movimientoId) return null;
+    try {
+      const adjunto = await api.obtenerAdjuntoMovimiento(pago.movimientoId);
+      if (!adjunto) {
+        setDetalleAdjuntoError("No se pudo recuperar el comprobante adjunto.");
+      }
+      return adjunto;
+    } catch (err) {
+      const mensaje = String(err);
+      setDetalleAdjuntoError(mensaje);
+      return null;
+    }
+  };
+
+  const abrirAdjuntoPago = async (pago: PagoFila) => {
+    if (visorAdjunto) {
+      setVisorAdjunto(null);
+      return;
+    }
+    const adjunto = await cargarAdjuntoPago(pago);
+    if (adjunto) setVisorAdjunto(adjunto);
+  };
+
+  const imprimirDetallePago = async () => {
+    if (!pagoDetalle) return;
+    let adjunto = detalleAdjunto;
+    if (imprimirComprobante && !adjunto) {
+      adjunto = await cargarAdjuntoPago(pagoDetalle);
+      if (!adjunto) return;
+    }
+
+    const escapar = (valor: string) => valor.replace(/[&<>"']/g, (caracter) => ({
+      "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
+    }[caracter] || caracter));
+    const comprobante = adjunto && imprimirComprobante
+      ? adjunto.dataUrl.startsWith("data:image/")
+        ? `<h3>Comprobante adjunto</h3><img src="${adjunto.dataUrl}" alt="${escapar(adjunto.nombre)}">`
+        : `<h3>Comprobante adjunto</h3><div class="pdf-note">${escapar(adjunto.nombre)} (archivo PDF adjunto)</div>`
+      : "";
+    const iframe = document.createElement("iframe");
+    iframe.style.position = "fixed";
+    iframe.style.width = "1px";
+    iframe.style.height = "1px";
+    iframe.style.border = "0";
+    iframe.style.opacity = "0";
+    document.body.appendChild(iframe);
+    iframe.contentDocument?.open();
+    iframe.contentDocument?.write(`<!doctype html><html lang="es"><head><meta charset="utf-8"><title>Detalle del movimiento</title>
+      <style>
+        @page { size: A4 portrait; margin: 10mm; }
+        * { box-sizing: border-box; }
+        body { font-family: Arial, sans-serif; color: #1f2937; padding: 0; margin: 0; }
+        h1 { font-size: 20px; margin: 0 0 14px; } h3 { margin: 14px 0 8px; font-size: 14px; }
+        .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 16px; }
+        .item span { display: block; color: #6b7280; font-size: 12px; font-weight: 600; margin-bottom: 4px; }
+        .amount { color: #15803d; font-size: 18px; font-weight: 700; }
+        .description { margin-top: 16px; padding: 10px; background: #f3f4f6; border: 1px solid #d1d5db; }
+        .attachment { margin-top: 14px; page-break-inside: avoid; break-inside: avoid; }
+        img { display: block; max-width: 100%; max-height: 145mm; object-fit: contain; }
+        .pdf-note { padding: 12px; border: 1px solid #d1d5db; }
+      </style></head><body>
+      <h1>Detalle del movimiento #${pagoDetalle.movimientoId || pagoDetalle.id}</h1>
+      <div class="grid">
+        <div class="item"><span>Fecha del movimiento</span><strong>${escapar(pagoDetalle.fechaPago)}</strong></div>
+        <div class="item"><span>Registrado por</span><strong>${escapar(pagoDetalle.registradoPor || "—")}</strong></div>
+        <div class="item"><span>Monto operado</span><strong class="amount">+ ${escapar(money(pagoDetalle.monto))}</strong></div>
+        <div class="item"><span>Categoría</span><strong>Cuotas</strong></div>
+        <div class="item"><span>N° de comprobante / factura</span><strong>${escapar(pagoDetalle.comprobante || "Sin comprobante asociado")}</strong></div>
+        <div class="item"><span>Medio de pago</span><strong>${escapar(pagoDetalle.medio)}</strong></div>
+      </div>
+      <div class="description"><strong>Concepto / descripción detallada</strong><br>
+        Asociado N° ${pagoDetalle.asociadoId} - Cuota Social · Período ${escapar(pagoDetalle.periodo)}<br>${escapar(pagoDetalle.apellidoNombre)}
+      </div>${comprobante ? `<div class="attachment">${comprobante}</div>` : ""}</body></html>`);
+    iframe.contentDocument?.close();
+    setTimeout(() => {
+      iframe.contentWindow?.focus();
+      iframe.contentWindow?.print();
+      setTimeout(() => iframe.remove(), 1000);
+    }, 100);
+  };
+
+  const abrirDetallePago = (pago: PagoFila) => {
+    setPagoDetalle(pago);
+    setDetalleAdjunto(null);
+    setDetalleAdjuntoError(null);
+    setImprimirComprobante(false);
+    setDetalleAltura(null);
+  };
+
+  useEffect(() => {
+    if (!pagoDetalle || !detalleCardRef.current) return;
+    const actualizarAltura = () => {
+      if (detalleCardRef.current) setDetalleAltura(detalleCardRef.current.offsetHeight);
+    };
+    actualizarAltura();
+    const observer = new ResizeObserver(actualizarAltura);
+    observer.observe(detalleCardRef.current);
+    return () => observer.disconnect();
+  }, [pagoDetalle, imprimirComprobante, detalleAdjunto]);
 
   const columns: Column<PagoFila>[] = [
-    { header: "Fecha", minWidth: 105, flex: true, render: (p) => p.fechaPago },
+    { header: "Fecha", minWidth: 90, flex: true, render: (p) => p.fechaPago },
     {
       header: "Comprobante",
-      minWidth: 135,
+      minWidth: 105,
       flex: true,
       render: (p) => p.comprobante || `REC-${p.id}`,
     },
     {
       header: "Asociado",
-      minWidth: 220,
+      minWidth: 160,
       flex: true,
       render: (p) => <strong>{p.apellidoNombre}</strong>,
     },
-    { header: "DNI", minWidth: 110, flex: true, render: (p) => p.dni },
+    { header: "DNI", minWidth: 90, flex: true, render: (p) => p.dni },
     {
       header: "Período",
-      minWidth: 100,
+      minWidth: 85,
       flex: true,
       render: (p) => <Badge tone="ok">{p.periodo}</Badge>,
     },
-    { header: "Medio", minWidth: 110, flex: true, render: (p) => p.medio },
+    { header: "Medio", minWidth: 95, flex: true, render: (p) => p.medio },
     {
       header: "Monto",
-      minWidth: 120,
+      minWidth: 100,
       flex: true,
       render: (p) => <strong>{money(p.monto)}</strong>,
     },
     {
       header: "Registrado por",
-      minWidth: 140,
+      minWidth: 110,
       flex: true,
       render: (p) => {
         // En la tabla se muestra únicamente el rol
@@ -180,7 +347,7 @@ export default function Cuotas() {
     },
     {
       header: "Acciones",
-      width: 85,
+      width: 70,
       align: "center",
       render: (p) => (
         <IconButton
@@ -205,7 +372,21 @@ export default function Cuotas() {
     return (
       <Layout
         title="Cuotas y pagos"
-        action={<Button onClick={abrirNuevoPago}>+ Registrar pago</Button>}
+        action={
+          <div style={{ display: "flex", gap: "var(--space-3)" }}>
+            <Button
+              variant="secondary"
+              onClick={imprimirListadoPagos}
+              style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}
+            >
+              <PrinterIcon size={16} />
+              Imprimir listado
+            </Button>
+            {(usuario.rol === "Tesorero" || usuario.rol === "Superadmin") && (
+              <Button onClick={abrirNuevoPago}>+ Registrar pago</Button>
+            )}
+          </div>
+        }
       >
         <div className={s.filters}>
           <Field
@@ -217,7 +398,7 @@ export default function Cuotas() {
             width={360}
           />
           <SelectField
-            label="Filtrar por período"
+            label="Mes de pago"
             value={periodo}
             options={PERIODOS_FILTRO}
             onChange={setPeriodo}
@@ -225,20 +406,94 @@ export default function Cuotas() {
           />
         </div>
 
-        <p className={s.summary}>
-          {pagos.length} pagos registrados · Total recaudado: {money(totalRecaudado)}
-        </p>
-
-        <DataTable
-          columns={columns}
-          rows={pagos}
-          rowKey={(p) => p.id}
-          emptyMessage={loading ? "Cargando pagos..." : "No se encontraron pagos registrados."}
-          onRowClick={(p) => {
-            setReciboSeleccionado(p);
-            setVista("recibo");
-          }}
-        />
+        <div className={s.paymentsTable}>
+          <DataTable
+            columns={columns}
+            rows={pagos}
+            rowKey={(p) => p.id}
+            stickyHeader
+            emptyMessage={loading ? "Cargando pagos..." : "No se encontraron pagos registrados."}
+            onRowClick={(p) => void abrirDetallePago(p)}
+          />
+        </div>
+        {pagoDetalle && (
+          <div className={s.detailOverlay} onClick={() => setPagoDetalle(null)}>
+            <div className={`${s.detailWorkspace} ${visorAdjunto ? s.withPreview : s.withoutPreview}`} onClick={(e) => e.stopPropagation()}>
+            <div ref={detalleCardRef} className={s.detailCard} onClick={(e) => e.stopPropagation()}>
+              <div className={s.detailHeader}>
+                <h2>Detalle del movimiento #{pagoDetalle.movimientoId || pagoDetalle.id}</h2>
+                <button type="button" className={`${s.detailClose} ${s.noPrint}`} onClick={() => setPagoDetalle(null)}>✕</button>
+              </div>
+              <div className={s.detailBody}>
+                <div className={s.detailStatus}>
+                  <Badge tone="ok">Ingreso de Fondos</Badge>
+                  <Badge tone="ok">Efectivo / Válido</Badge>
+                </div>
+                <div className={s.detailGrid}>
+                  <div><span>Fecha del movimiento</span><strong>{pagoDetalle.fechaPago}</strong></div>
+                  <div><span>Registrado por</span><strong>{pagoDetalle.registradoPor || "—"}</strong></div>
+                  <div><span>Monto operado</span><strong className={s.detailAmount}>+ {money(pagoDetalle.monto)}</strong></div>
+                  <div><span>Categoría</span><strong>Cuotas</strong></div>
+                  <div>
+                    <span>N° de comprobante / factura</span>
+                    <div className={s.detailInline}>
+                      <strong>{pagoDetalle.comprobante || "Sin comprobante asociado"}</strong>
+                      {pagoDetalle.adjuntoNombre && (
+                        <button type="button" className={`${s.attachmentButton} ${s.noPrint}`} onClick={() => void abrirAdjuntoPago(pagoDetalle)} aria-label="Ver comprobante adjunto" title="Ver comprobante adjunto">
+                          <SearchIcon size={16} />
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                  <div><span>Medio de pago</span><strong>{pagoDetalle.medio}</strong></div>
+                </div>
+                {detalleAdjuntoError && <p className={s.detailAttachmentError}>{detalleAdjuntoError}</p>}
+                <div className={s.detailDescription}>
+                  <span>Concepto / descripción detallada</span>
+                  <p>Asociado N° {pagoDetalle.asociadoId} - Cuota Social · Período {pagoDetalle.periodo}<br />{pagoDetalle.apellidoNombre}</p>
+                </div>
+                {pagoDetalle.adjuntoNombre && (
+                  <label className={`${s.printOption} ${s.noPrint}`}>
+                    <input
+                      type="checkbox"
+                      checked={imprimirComprobante}
+                      onChange={async (e) => {
+                        const checked = e.target.checked;
+                        setImprimirComprobante(checked);
+                        if (checked && !detalleAdjunto) {
+                          setDetalleAdjunto(await cargarAdjuntoPago(pagoDetalle));
+                        }
+                      }}
+                    />
+                    ¿Desea imprimir el comprobante junto al detalle?
+                  </label>
+                )}
+              </div>
+              <div className={`${s.detailFooter} ${s.noPrint}`}>
+                <Button variant="secondary" onClick={() => void imprimirDetallePago()}><PrinterIcon size={16} /> Imprimir detalle</Button>
+                <Button variant="secondary" onClick={() => setPagoDetalle(null)}>Cerrar</Button>
+              </div>
+            </div>
+            {visorAdjunto && (
+              <div
+                className={s.attachmentPreview}
+                style={detalleAltura ? { height: `${detalleAltura}px` } : undefined}
+                onClick={() => setVisorAdjunto(null)}
+              >
+                <div className={s.detailHeader}>
+                  <h2>{visorAdjunto.nombre}</h2>
+                  <button type="button" className={s.detailClose} onClick={() => setVisorAdjunto(null)}>✕</button>
+                </div>
+                {visorAdjunto.dataUrl.startsWith("data:application/pdf") ? (
+                  <iframe src={visorAdjunto.dataUrl} title={visorAdjunto.nombre} />
+                ) : (
+                  <img src={visorAdjunto.dataUrl} alt={visorAdjunto.nombre} />
+                )}
+              </div>
+            )}
+            </div>
+          </div>
+        )}
       </Layout>
     );
   }
@@ -409,13 +664,45 @@ export default function Cuotas() {
                   width={220}
                 />
                 <Field
-                  label="N° Comprobante / Recibo"
+                  label="Comprobante"
                   type="text"
                   placeholder="Ej: REC-1045"
                   value={pagoComprobante}
                   onChange={(e) => setPagoComprobante(e.target.value)}
                   width={220}
                 />
+                <Button
+                  type="button"
+                  variant="secondary"
+                  onClick={() => document.getElementById("pago-comprobante-file")?.click()}
+                  style={{ height: "48px", alignSelf: "flex-end", display: "inline-flex", alignItems: "center", gap: "6px" }}
+                >
+                  <PaperclipIcon size={16} />
+                  Agregar comprobante
+                </Button>
+                <input
+                  id="pago-comprobante-file"
+                  type="file"
+                  accept=".pdf,image/*"
+                  style={{ display: "none" }}
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (!file) return;
+                    if (file.size > 10 * 1024 * 1024) {
+                      setPagoError("El comprobante adjunto supera el límite de 10 MB.");
+                      e.target.value = "";
+                      return;
+                    }
+                    setPagoAdjuntoNombre(file.name);
+                    if (!pagoComprobante.trim()) setPagoComprobante(file.name.replace(/\.[^/.]+$/, ""));
+                    const reader = new FileReader();
+                    reader.onload = () => {
+                      if (typeof reader.result === "string") setPagoAdjuntoDatos(reader.result);
+                    };
+                    reader.readAsDataURL(file);
+                  }}
+                />
+                {pagoAdjuntoNombre && <span className={s.attachmentName}>{pagoAdjuntoNombre}</span>}
               </div>
             </div>
           </Card>

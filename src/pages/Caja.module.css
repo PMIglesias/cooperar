@@ -118,6 +118,43 @@
   max-height: 90vh;
 }
 
+.detailWorkspace {
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  gap: var(--space-4);
+  width: fit-content;
+  max-width: 95vw;
+  max-height: 90vh;
+}
+
+.detailWorkspace.withPreview { width: 1044px; }
+.detailWorkspace.withoutPreview { width: 580px; }
+
+.attachmentPreview {
+  width: 440px;
+  flex: 0 0 440px;
+  height: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-card);
+  box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.15);
+}
+
+.attachmentPreview iframe,
+.attachmentPreview img {
+  flex: 1;
+  width: 100%;
+  min-height: 0;
+  border: 0;
+  object-fit: contain;
+  padding: var(--space-4);
+}
+
 .modalHeader {
   display: flex;
   justify-content: space-between;
@@ -239,6 +276,16 @@
   transform: scale(1.05);
 }
 
+.printOption {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+  font-size: var(--fs-sm);
+  color: var(--color-text);
+  cursor: pointer;
+}
+
 .voucherContainer {
   display: flex;
   align-items: flex-end;
@@ -250,6 +297,28 @@
 @media print {
   body * {
     visibility: hidden;
+  }
+
+  @media (max-width: 900px) {
+    .detailWorkspace.withPreview,
+    .detailWorkspace.withoutPreview {
+      width: min(580px, 95vw);
+    }
+
+    .detailWorkspace {
+      flex-direction: column;
+      overflow-y: auto;
+    }
+
+    .modalCard,
+    .attachmentPreview {
+      width: min(580px, 95vw);
+      flex-basis: auto;
+    }
+
+    .attachmentPreview {
+      height: 60vh;
+    }
   }
   .printSection, .printSection * {
     visibility: visible;

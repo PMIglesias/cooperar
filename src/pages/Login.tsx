@@ -83,6 +83,9 @@ export default function Login({ onLogin }: { onLogin: (u: Usuario) => void }) {
             <button type="button" className={s.demoBtn} onClick={() => seleccionarDemo("40000004")}>
               Tesorero
             </button>
+            <button type="button" className={s.demoBtn} onClick={() => seleccionarDemo("18000000")}>
+              Asesor
+            </button>
           </div>
         </div>
       </form>

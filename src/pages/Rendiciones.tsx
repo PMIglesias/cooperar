@@ -9,7 +9,7 @@ import DataTable, { Column } from "../components/ui/DataTable";
 import { Field, SelectField } from "../components/ui/Field";
 import ConfirmDialog from "../components/ui/ConfirmDialog";
 import IconButton from "../components/ui/IconButton";
-import { DocumentIcon, CheckIcon, TrashIcon } from "../components/icons";
+import { DocumentIcon, CheckIcon, TrashIcon, PrinterIcon } from "../components/icons";
 import { useApp } from "../context";
 import s from "./Rendiciones.module.css";
 
@@ -131,6 +131,56 @@ export default function Rendiciones() {
     }
   };
 
+  const imprimirRendicion = () => {
+    if (!rendicionSeleccionada) return;
+    const escapar = (valor: string) => valor.replace(/[&<>"']/g, (caracter) => ({
+      "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
+    }[caracter] || caracter));
+    const filas = (lineas: LineaRendicion[], vacio: string) => (
+      lineas.length
+        ? lineas.map((linea) => `<tr><td>${escapar(linea.categoria)}</td><td>${escapar(money(linea.total))}</td></tr>`).join("")
+        : `<tr><td colspan="2" class="muted">${vacio}</td></tr>`
+    );
+    const iframe = document.createElement("iframe");
+    Object.assign(iframe.style, { position: "fixed", width: "1px", height: "1px", border: "0", opacity: "0" });
+    document.body.appendChild(iframe);
+    iframe.contentDocument?.open();
+    iframe.contentDocument?.write(`<!doctype html><html lang="es"><head><meta charset="utf-8"><title>Planilla de rendición</title>
+      <style>
+        @page { size: A4 portrait; margin: 16mm; }
+        * { box-sizing: border-box; }
+        body { font-family: Arial, sans-serif; color: #1a1a1a; margin: 0; }
+        h1 { text-align: center; font-size: 21px; margin: 0 0 5px; }
+        .subtitle { text-align: center; color: #4b5563; margin-bottom: 18px; }
+        .meta { display: flex; justify-content: space-between; gap: 12px; padding: 9px; background: #f3f4f6; border-radius: 4px; font-size: 11px; margin-bottom: 18px; }
+        .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 22px; }
+        h2 { font-size: 14px; padding-bottom: 6px; border-bottom: 2px solid; margin: 0 0 8px; }
+        .income { color: #15803d; border-color: #15803d; } .expense { color: #b91c1c; border-color: #b91c1c; }
+        table { width: 100%; border-collapse: collapse; font-size: 12px; }
+        td { padding: 6px 0; border-bottom: 1px dotted #d1d5db; } td:last-child { text-align: right; font-weight: 600; }
+        .total { font-weight: 700; border-top: 2px solid; } .total.income { color: #15803d; } .total.expense { color: #b91c1c; }
+        .muted { color: #6b7280; } .balance { margin-top: 20px; padding: 12px; background: #f3f4f6; display: flex; justify-content: space-between; font-weight: 700; }
+        .signatures { display: grid; grid-template-columns: repeat(3, 1fr); gap: 24px; margin-top: 60px; text-align: center; font-size: 11px; }
+        .signatures span { display: block; border-top: 1px solid #9ca3af; padding-top: 7px; }
+      </style></head><body>
+      <h1>Planilla de Rendición de Cuentas</h1>
+      <div class="subtitle">Asociación Cooperadora Escolar — ${escapar(rendicionSeleccionada.periodo)}</div>
+      <div class="meta"><span>Período: ${escapar(rendicionSeleccionada.desde)} al ${escapar(rendicionSeleccionada.hasta)}</span><span>Generada por: ${escapar(rendicionSeleccionada.generadaPor)}</span><span>Estado: ${escapar(rendicionSeleccionada.estado)}</span></div>
+      <div class="grid">
+        <section><h2 class="income">I. INGRESOS</h2><table>${filas(lineasIngreso, "Sin ingresos en el período")}<tr class="total income"><td>TOTAL INGRESOS</td><td>+ ${escapar(money(rendicionSeleccionada.totalIngresos))}</td></tr></table></section>
+        <section><h2 class="expense">II. EGRESOS</h2><table>${filas(lineasEgreso, "Sin egresos en el período")}<tr class="total expense"><td>TOTAL EGRESOS</td><td>- ${escapar(money(rendicionSeleccionada.totalEgresos))}</td></tr></table></section>
+      </div>
+      <div class="balance"><span>SALDO FINAL DEL PERÍODO</span><span>${escapar(money(rendicionSeleccionada.saldoPeriodo))}</span></div>
+      <div class="signatures"><span>Tesorero/a</span><span>Presidente</span><span>Revisor de Cuentas</span></div>
+      </body></html>`);
+    iframe.contentDocument?.close();
+    setTimeout(() => {
+      iframe.contentWindow?.focus();
+      iframe.contentWindow?.print();
+      setTimeout(() => iframe.remove(), 1000);
+    }, 100);
+  };
+
   const rendicionesFiltradas = rendiciones.filter((r) => {
     const matchEstado = estadoFiltro === "Todos" || r.estado === estadoFiltro;
     const matchBusqueda =
@@ -143,13 +193,13 @@ export default function Rendiciones() {
   const columns: Column<RendicionFila>[] = [
     {
       header: "Período",
-      minWidth: 150,
+      minWidth: 120,
       flex: true,
       render: (r) => <strong>{r.periodo}</strong>,
     },
     {
       header: "Rango de fechas",
-      minWidth: 180,
+      minWidth: 160,
       flex: true,
       render: (r) => (
         <span>
@@ -157,22 +207,22 @@ export default function Rendiciones() {
         </span>
       ),
     },
-    { header: "Generada el", minWidth: 120, flex: true, render: (r) => r.generadaEn },
+    { header: "Generada el", minWidth: 110, flex: true, render: (r) => r.generadaEn },
     {
       header: "Ingresos",
-      minWidth: 120,
+      minWidth: 105,
       flex: true,
       render: (r) => <span style={{ color: "var(--color-ok)", fontWeight: 600 }}>+ {money(r.totalIngresos)}</span>,
     },
     {
       header: "Egresos",
-      minWidth: 120,
+      minWidth: 105,
       flex: true,
       render: (r) => <span style={{ color: "var(--color-danger)", fontWeight: 600 }}>- {money(r.totalEgresos)}</span>,
     },
     {
       header: "Saldo",
-      minWidth: 130,
+      minWidth: 110,
       flex: true,
       render: (r) => (
         <strong style={{ color: r.saldoPeriodo >= 0 ? "var(--color-ok)" : "var(--color-danger)" }}>
@@ -182,7 +232,7 @@ export default function Rendiciones() {
     },
     {
       header: "Estado",
-      minWidth: 110,
+      minWidth: 100,
       flex: true,
       render: (r) => (
         <Badge tone={r.estado === "Aprobada" ? "ok" : "warn"}>
@@ -382,8 +432,8 @@ export default function Rendiciones() {
       title="Rendiciones › Planilla de balance"
       action={
         <div style={{ display: "flex", gap: "var(--space-4)" }}>
-          <Button variant="secondary" onClick={() => window.print()}>
-            🖨️ Imprimir planilla
+          <Button variant="secondary" onClick={imprimirRendicion} style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}>
+            <PrinterIcon size={16} /> Imprimir planilla
           </Button>
           <Button variant="secondary" onClick={() => setVista("lista")}>
             ← Volver al listado

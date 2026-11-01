@@ -16,15 +16,19 @@ import { EditIcon, ToggleActiveIcon } from "../components/icons";
 import { Field, SelectField } from "../components/ui/Field";
 import ConfirmDialog from "../components/ui/ConfirmDialog";
 import s from "./Usuarios.module.css";
+import { useApp } from "../context";
 
 const ROLES: { value: Rol; label: string }[] = [
   { value: "Superadmin", label: "Superadministrador (Acceso total)" },
   { value: "Presidente", label: "Presidente de Cooperadora" },
   { value: "Secretaria", label: "Secretario/a (Padrones y Actas)" },
   { value: "Tesorero", label: "Tesorero/a (Caja y Cobranzas)" },
+  { value: "Asesor", label: "Asesor (Sólo lectura)" },
 ];
 
 export default function Usuarios() {
+  const { usuario } = useApp();
+  const puedeGestionar = usuario.rol === "Superadmin";
   const [vista, setVista] = useState<"lista" | "formulario">("lista");
   const [activeTab, setActiveTab] = useState<"usuarios" | "respaldo">("usuarios");
 
@@ -33,7 +37,6 @@ export default function Usuarios() {
   const [editingUserId, setEditingUserId] = useState<number | null>(null);
   const [userNombre, setUserNombre] = useState("");
   const [userDni, setUserDni] = useState("");
-  const [userEmail, setUserEmail] = useState("");
   const [userRol, setUserRol] = useState<Rol>("Secretaria");
   const [userClave, setUserClave] = useState("");
   const [userSaving, setUserSaving] = useState(false);
@@ -64,7 +67,6 @@ export default function Usuarios() {
     setEditingUserId(null);
     setUserNombre("");
     setUserDni("");
-    setUserEmail("");
     setUserRol("Secretaria");
     setUserClave("admin123");
     setUserError(null);
@@ -75,7 +77,6 @@ export default function Usuarios() {
     setEditingUserId(u.id);
     setUserNombre(u.nombre);
     setUserDni(u.dni);
-    setUserEmail(u.email || "");
     setUserRol(u.rol);
     setUserClave("");
     setUserError(null);
@@ -96,7 +97,6 @@ export default function Usuarios() {
         await api.actualizarUsuario(editingUserId, {
           nombre: userNombre.trim(),
           dni: userDni.trim(),
-          email: userEmail.trim() || undefined,
           rol: userRol,
           clave: userClave.trim() || undefined,
         });
@@ -104,7 +104,6 @@ export default function Usuarios() {
         await api.crearUsuario({
           nombre: userNombre.trim(),
           dni: userDni.trim(),
-          email: userEmail.trim() || undefined,
           rol: userRol,
           clave: userClave.trim() || "admin123",
         });
@@ -211,22 +210,22 @@ export default function Usuarios() {
         return <Badge tone={tone}>{u.rol}</Badge>;
       },
     },
-    { header: "Correo electrónico", minWidth: 200, flex: true, render: (u) => u.email || "—" },
+    { header: "Cargo en la nómina", minWidth: 220, flex: true, render: (u) => u.cargo || "—" },
     {
       header: "Estado",
       minWidth: 110,
       flex: true,
-      render: (u) => (
+      render: (u) => puedeGestionar ? (
         <Badge tone={u.activo === 1 ? "ok" : "danger"}>
           {u.activo === 1 ? "Activo" : "Inactivo"}
         </Badge>
-      ),
+      ) : null,
     },
     {
       header: "Acciones",
       width: 95,
       align: "center",
-      render: (u) => (
+      render: (u) => puedeGestionar ? (
         <div style={{ display: "flex", gap: "6px", alignItems: "center", justifyContent: "center" }}>
           <IconButton
             icon={<EditIcon size={16} />}
@@ -247,7 +246,7 @@ export default function Usuarios() {
             }}
           />
         </div>
-      ),
+      ) : null,
     },
   ];
 
@@ -310,6 +309,7 @@ export default function Usuarios() {
       <Layout
         title="Usuarios y respaldo"
         action={
+          !puedeGestionar ? undefined :
           activeTab === "usuarios" ? (
             <Button onClick={abrirNuevoUsuario}>+ Nuevo usuario</Button>
           ) : activeTab === "respaldo" ? (
@@ -381,7 +381,7 @@ export default function Usuarios() {
 
             <Card title="Historial de copias de seguridad">
               <DataTable
-                columns={columnsCopias}
+                columns={puedeGestionar ? columnsCopias : columnsCopias.filter((column) => column.header !== "Acciones")}
                 rows={copias}
                 rowKey={(c) => c.nombreArchivo}
                 emptyMessage="No hay copias de seguridad registradas."
@@ -476,14 +476,6 @@ export default function Usuarios() {
             </div>
 
             <div className={s.formRow}>
-              <Field
-                label="Correo electrónico"
-                type="email"
-                placeholder="correo@ejemplo.com"
-                value={userEmail}
-                onChange={(e) => setUserEmail(e.target.value)}
-                width={300}
-              />
               <SelectField
                 label="Rol de acceso"
                 value={userRol}

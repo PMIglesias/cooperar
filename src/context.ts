@@ -2,7 +2,7 @@
 import { createContext, useContext } from "react";
 import type { Usuario } from "./api";
 
-export type Route = "inicio" | "asociados" | "cuotas" | "caja" | "reuniones" | "rendiciones" | "documentacion" | "comision" | "usuarios";
+export type Route = "inicio" | "asociados" | "cuotas" | "caja" | "reuniones" | "rendiciones" | "documentacion" | "comision" | "usuarios" | "historial";
 
 export interface AppCtx {
   usuario: Usuario;

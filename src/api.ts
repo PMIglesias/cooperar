@@ -1,12 +1,20 @@
 // src/api.ts
 import { invoke } from "@tauri-apps/api/core";
 
-export type Rol = "Presidente" | "Secretaria" | "Tesorero" | "Superadmin";
+export type Rol = "Presidente" | "Secretaria" | "Tesorero" | "Superadmin" | "Asesor";
 export interface Usuario { id: number; nombre: string; rol: Rol }
 export interface Movimiento { descripcion: string; tipo: "Ingreso" | "Egreso"; monto: number }
 export interface ResumenInicio {
   saldoCaja: number; cuotasCobradas: number; cuotasTotal: number; conDeuda: number;
   proximaReunion: string | null; ultimosMovimientos: Movimiento[]; ultimaCopia: string | null;
+}
+export interface AuditoriaFila {
+  id: number;
+  usuario: string;
+  fechaHora: string;
+  accion: string;
+  entidad: string;
+  entidadId: number | null;
 }
 export interface ResumenPadron { activos: number; conDeuda: number; exentos: number }
 export type EstadoCuotas = "Al día" | "Con deuda" | "Exento";
@@ -16,9 +24,11 @@ export interface AsociadoFila {
   apellidoNombre: string;
   dni: string;
   telefono: string | null;
+  email: string | null;
   alumnos: string | null;
   estadoCuotas: EstadoCuotas;
   activo: number;
+  tipoVinculo: string;
 }
 
 export interface AlumnoItem {
@@ -39,6 +49,7 @@ export interface AsociadoDetalle {
   estadoCuotas: EstadoCuotas;
   exento: number;
   activo: number;
+  tipoVinculo: string;
 }
 
 export interface DatosAsociado {
@@ -46,6 +57,7 @@ export interface DatosAsociado {
   dni: string;
   telefono?: string;
   email?: string;
+  tipoVinculo: string;
   alumnos: { nombre: string; curso: string }[];
 }
 
@@ -65,6 +77,8 @@ export interface PagoFila {
   registradoPor: string;
   registradoPorRol?: string;
   registradoPorNombre?: string;
+  movimientoId?: number | null;
+  adjuntoNombre?: string | null;
 }
 
 export interface DatosPago {
@@ -73,6 +87,8 @@ export interface DatosPago {
   monto: number;
   medio: string;
   comprobante?: string;
+  adjuntoNombre?: string;
+  adjuntoDatos?: string;
 }
 
 // Caja
@@ -163,6 +179,7 @@ export interface MiembroComisionFila {
   orden: number;
   cargo: string;
   asociadoId?: number | null;
+  personalEstablecimientoId?: number | null;
   nombre: string;
   dni: string;
   cuil: string;
@@ -192,6 +209,9 @@ export interface DocumentoAsambleaFila {
   generadoPor: string;
   archivoPdf: string;
   datosJson: string;
+  aprobado: number;
+  aprobadoPor: string | null;
+  aprobadoEn: string | null;
 }
 
 export interface GuardarDocumentoParams {
@@ -229,7 +249,7 @@ export interface UsuarioFila {
   id: number;
   nombre: string;
   dni: string;
-  email: string | null;
+  cargo: string | null;
   rol: Rol;
   activo: number;
 }
@@ -237,7 +257,6 @@ export interface UsuarioFila {
 export interface DatosUsuario {
   nombre: string;
   dni: string;
-  email?: string;
   rol: Rol;
   clave?: string;
 }
@@ -259,6 +278,7 @@ export const DEMO_USUARIOS = [
   { dni: "20000002", nombre: "Carlos Gómez", rol: "Presidente" as Rol, clave: "admin123" },
   { dni: "30000003", nombre: "Mariana López", rol: "Secretaria" as Rol, clave: "admin123" },
   { dni: "40000004", nombre: "Roberto Fernández", rol: "Tesorero" as Rol, clave: "admin123" },
+  { dni: "18000000", nombre: "Director/a Escolar", rol: "Asesor" as Rol, clave: "admin123" },
 ];
 
 const isTauri = typeof window !== "undefined" && Boolean((window as unknown as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__);
@@ -268,42 +288,42 @@ let mockAsociados: AsociadoDetalle[] = [
   {
     id: 1, apellidoNombre: "Álvarez, Marcos", dni: "32111222", telefono: "11-4567-8901", email: "marcos.alvarez@email.com",
     fechaAlta: "2026-07-01", alumnos: "Lucía Álvarez (3° A)", listaAlumnos: [{ id: 1, nombre: "Lucía Álvarez", curso: "3° A" }],
-    estadoCuotas: "Al día", exento: 0, activo: 1,
+    estadoCuotas: "Al día", exento: 0, activo: 1, tipoVinculo: "PADRE_TUTOR",
   },
   {
     id: 2, apellidoNombre: "Fernández, Valeria", dni: "29888777", telefono: "11-9876-5432", email: "valeria.fernandez@email.com",
     fechaAlta: "2026-04-01", alumnos: "Mateo Fernández (5° B), Sofía Fernández (1° A)", listaAlumnos: [{ id: 2, nombre: "Mateo Fernández", curso: "5° B" }, { id: 3, nombre: "Sofía Fernández", curso: "1° A" }],
-    estadoCuotas: "Con deuda", exento: 0, activo: 1,
+    estadoCuotas: "Con deuda", exento: 0, activo: 1, tipoVinculo: "PADRE_TUTOR",
   },
   {
     id: 3, apellidoNombre: "Gómez, Santiago", dni: "34555666", telefono: "11-2233-4455", email: "santiago.gomez@email.com",
     fechaAlta: "2025-10-01", alumnos: "Ignacio Gómez (2° C)", listaAlumnos: [{ id: 4, nombre: "Ignacio Gómez", curso: "2° C" }],
-    estadoCuotas: "Exento", exento: 1, activo: 1,
+    estadoCuotas: "Exento", exento: 1, activo: 1, tipoVinculo: "SIN_VINCULO",
   },
   {
     id: 4, apellidoNombre: "López, Mariana", dni: "31222333", telefono: "11-6677-8899", email: "mariana.lopez@email.com",
     fechaAlta: "2026-08-01", alumnos: "Camila López (4° A)", listaAlumnos: [{ id: 5, nombre: "Camila López", curso: "4° A" }],
-    estadoCuotas: "Al día", exento: 0, activo: 1,
+    estadoCuotas: "Al día", exento: 0, activo: 1, tipoVinculo: "PERSONAL_ESCOLAR",
   },
   {
     id: 5, apellidoNombre: "Martínez, Diego", dni: "28777666", telefono: "11-3344-5566", email: "diego.martinez@email.com",
     fechaAlta: "2026-05-01", alumnos: "Tomás Martínez (6° B)", listaAlumnos: [{ id: 6, nombre: "Tomás Martínez", curso: "6° B" }],
-    estadoCuotas: "Al día", exento: 0, activo: 1,
+    estadoCuotas: "Al día", exento: 0, activo: 1, tipoVinculo: "PADRE_TUTOR",
   },
   {
     id: 6, apellidoNombre: "Rodríguez, Laura", dni: "33444555", telefono: "11-5566-7788", email: "laura.rodriguez@email.com",
     fechaAlta: "2026-09-01", alumnos: "Benjamín Rodríguez (1° B)", listaAlumnos: [{ id: 7, nombre: "Benjamín Rodríguez", curso: "1° B" }],
-    estadoCuotas: "Al día", exento: 0, activo: 1,
+    estadoCuotas: "Al día", exento: 0, activo: 1, tipoVinculo: "PADRE_TUTOR",
   },
   {
     id: 7, apellidoNombre: "Romero, Pablo", dni: "30111444", telefono: "11-7788-9900", email: "pablo.romero@email.com",
     fechaAlta: "2026-06-01", alumnos: "Martina Romero (2° A)", listaAlumnos: [{ id: 8, nombre: "Martina Romero", curso: "2° A" }],
-    estadoCuotas: "Al día", exento: 0, activo: 1,
+    estadoCuotas: "Al día", exento: 0, activo: 1, tipoVinculo: "PADRE_TUTOR",
   },
   {
     id: 8, apellidoNombre: "Sánchez, Elena", dni: "27999111", telefono: "11-8899-0011", email: "elena.sanchez@email.com",
     fechaAlta: "2026-02-01", alumnos: "Joaquín Sánchez (5° A)", listaAlumnos: [{ id: 9, nombre: "Joaquín Sánchez", curso: "5° A" }],
-    estadoCuotas: "Al día", exento: 0, activo: 1,
+    estadoCuotas: "Al día", exento: 0, activo: 1, tipoVinculo: "PADRE_TUTOR",
   },
 ];
 
@@ -336,10 +356,11 @@ let mockRendiciones: RendicionFila[] = [
 ];
 
 let mockUsuarios: UsuarioFila[] = [
-  { id: 1, nombre: "Administrador General", dni: "10000001", email: "admin@cooperar.local", rol: "Superadmin", activo: 1 },
-  { id: 2, nombre: "Carlos Gómez", dni: "20000002", email: "presidente@cooperar.local", rol: "Presidente", activo: 1 },
-  { id: 3, nombre: "Mariana López", dni: "30000003", email: "secretaria@cooperar.local", rol: "Secretaria", activo: 1 },
-  { id: 4, nombre: "Roberto Fernández", dni: "40000004", email: "tesorero@cooperar.local", rol: "Tesorero", activo: 1 },
+  { id: 1, nombre: "Administrador General", dni: "10000001", cargo: null, rol: "Superadmin", activo: 1 },
+  { id: 2, nombre: "Carlos Gómez", dni: "20000002", cargo: "PRESIDENTE", rol: "Presidente", activo: 1 },
+  { id: 3, nombre: "Mariana López", dni: "30000003", cargo: "SECRETARIO", rol: "Secretaria", activo: 1 },
+  { id: 4, nombre: "Roberto Fernández", dni: "40000004", cargo: "TESORERO", rol: "Tesorero", activo: 1 },
+  { id: 5, nombre: "Director/a Escolar", dni: "18000000", cargo: "ASESOR", rol: "Asesor", activo: 1 },
 ];
 
 let mockCopias: CopiaSeguridadFila[] = [
@@ -380,6 +401,10 @@ export const api = {
       ultimaCopia: mockConfiguracion.ultima_copia || "07/10/2026 05:20",
     };
   },
+  listarAuditoria: async (): Promise<AuditoriaFila[]> => {
+    if (isTauri) return invoke<AuditoriaFila[]>("listar_auditoria");
+    return [];
+  },
   resumenPadron: async (): Promise<ResumenPadron> => {
     if (isTauri) return invoke<ResumenPadron>("resumen_padron");
     const activos = mockAsociados.filter((a) => a.activo === 1);
@@ -405,9 +430,11 @@ export const api = {
         apellidoNombre: a.apellidoNombre,
         dni: a.dni,
         telefono: a.telefono,
+        email: a.email,
         alumnos: a.alumnos,
         estadoCuotas: a.estadoCuotas,
         activo: a.activo,
+        tipoVinculo: a.tipoVinculo,
       }));
   },
   obtenerAsociado: async (id: number): Promise<AsociadoDetalle> => {
@@ -436,6 +463,7 @@ export const api = {
       estadoCuotas: "Con deuda",
       exento: 0,
       activo: 1,
+      tipoVinculo: datos.tipoVinculo,
     };
     mockAsociados.push(nuevo);
     return id;
@@ -455,6 +483,7 @@ export const api = {
         dni: datos.dni.trim(),
         telefono: datos.telefono?.trim() || null,
         email: datos.email?.trim() || null,
+        tipoVinculo: datos.tipoVinculo,
         alumnos: alumnosStr || null,
         listaAlumnos,
       };
@@ -472,6 +501,10 @@ export const api = {
     if (isTauri) return invoke<void>("dar_de_baja", { id });
     const a = mockAsociados.find((x) => x.id === id);
     if (a) a.activo = 0;
+  },
+  eliminarAsociado: async (id: number): Promise<void> => {
+    if (isTauri) return invoke<void>("eliminar_asociado", { id });
+    mockAsociados = mockAsociados.filter((a) => a.id !== id);
   },
   reactivarAsociado: async (id: number): Promise<void> => {
     if (isTauri) return invoke<void>("reactivar_asociado", { id });
@@ -680,7 +713,7 @@ export const api = {
       id,
       nombre: datos.nombre,
       dni: datos.dni,
-      email: datos.email || null,
+      cargo: null,
       rol: datos.rol,
       activo: 1,
     });
@@ -692,7 +725,6 @@ export const api = {
     if (u) {
       u.nombre = datos.nombre;
       u.dni = datos.dni;
-      u.email = datos.email || null;
       u.rol = datos.rol;
     }
   },
@@ -748,16 +780,16 @@ export const api = {
   listarComisionDirectiva: async (): Promise<MiembroComisionFila[]> => {
     if (isTauri) return invoke<MiembroComisionFila[]>("listar_comision_directiva");
     return [
-      { id: 1, orden: 1, cargo: "PRESIDENTE", nombre: "Carlos Gómez", dni: "20000002", cuil: "20-20000002-3", domicilio: "Av. San Martín 1420", localidad: "Morón", telefono: "11-4567-1111", email: "carlos.gomez@email.com", vencimiento: "31/12/2027" },
-      { id: 2, orden: 2, cargo: "VICEPRESIDENTE", nombre: "Valeria Fernández", dni: "29888777", cuil: "27-29888777-4", domicilio: "Belgrano 450", localidad: "Morón", telefono: "11-9876-2222", email: "valeria.fernandez@email.com", vencimiento: "31/12/2027" },
-      { id: 3, orden: 3, cargo: "SECRETARIO", nombre: "Mariana López", dni: "30000003", cuil: "27-30000003-8", domicilio: "Mitre 830", localidad: "Morón", telefono: "11-6677-3333", email: "mariana.lopez@email.com", vencimiento: "31/12/2027" },
-      { id: 4, orden: 4, cargo: "TESORERO", nombre: "Roberto Fernández", dni: "40000004", cuil: "20-40000004-1", domicilio: "Sarmiento 112", localidad: "Morón", telefono: "11-3344-4444", email: "roberto.fernandez@email.com", vencimiento: "31/12/2027" },
-      { id: 5, orden: 5, cargo: "VOCAL TITULAR 1°", nombre: "Marcos Álvarez", dni: "32111222", cuil: "20-32111222-6", domicilio: "Rivadavia 310", localidad: "Morón", telefono: "11-4567-5555", email: "marcos.alvarez@email.com", vencimiento: "31/12/2027" },
-      { id: 6, orden: 6, cargo: "VOCAL TITULAR 2°", nombre: "Elena Sánchez", dni: "27999111", cuil: "27-27999111-5", domicilio: "Caseros 650", localidad: "Morón", telefono: "11-8899-6666", email: "elena.sanchez@email.com", vencimiento: "31/12/2027" },
-      { id: 7, orden: 7, cargo: "VOCAL TITULAR 3°", nombre: "Pablo Romero", dni: "30111444", cuil: "20-30111444-2", domicilio: "Alsina 920", localidad: "Morón", telefono: "11-7788-7777", email: "pablo.romero@email.com", vencimiento: "31/12/2027" },
-      { id: 8, orden: 8, cargo: "VOCAL SUPLENTE 1°", nombre: "Diego Martínez", dni: "28777666", cuil: "20-28777666-9", domicilio: "Brown 710", localidad: "Morón", telefono: "11-3344-8888", email: "diego.martinez@email.com", vencimiento: "31/12/2027" },
-      { id: 9, orden: 9, cargo: "VOCAL SUPLENTE 2°", nombre: "Laura Rodríguez", dni: "33444555", cuil: "27-33444555-0", domicilio: "Salta 184", localidad: "Morón", telefono: "11-5566-9999", email: "laura.rodriguez@email.com", vencimiento: "31/12/2027" },
-      { id: 10, orden: 10, cargo: "VOCAL SUPLENTE 3°", nombre: "Santiago Gómez", dni: "34555666", cuil: "20-34555666-3", domicilio: "Jujuy 530", localidad: "Morón", telefono: "11-2233-0000", email: "santiago.gomez@email.com", vencimiento: "31/12/2027" },
+      { id: 1, orden: 1, cargo: "PRESIDENTE", asociadoId: null, nombre: "Carlos Gómez", dni: "20000002", cuil: "20-20000002-3", domicilio: "Av. San Martín 1420", localidad: "Morón", telefono: "11-4567-1111", email: "carlos.gomez@email.com", vencimiento: "31/12/2027" },
+      { id: 2, orden: 2, cargo: "VICEPRESIDENTE", asociadoId: 2, nombre: "Valeria Fernández", dni: "29888777", cuil: "27-29888777-4", domicilio: "Belgrano 450", localidad: "Morón", telefono: "11-9876-2222", email: "valeria.fernandez@email.com", vencimiento: "31/12/2027" },
+      { id: 3, orden: 3, cargo: "SECRETARIO", asociadoId: 4, nombre: "Mariana López", dni: "30000003", cuil: "27-30000003-8", domicilio: "Mitre 830", localidad: "Morón", telefono: "11-6677-3333", email: "mariana.lopez@email.com", vencimiento: "31/12/2027" },
+      { id: 4, orden: 4, cargo: "TESORERO", asociadoId: null, nombre: "Roberto Fernández", dni: "40000004", cuil: "20-40000004-1", domicilio: "Sarmiento 112", localidad: "Morón", telefono: "11-3344-4444", email: "roberto.fernandez@email.com", vencimiento: "31/12/2027" },
+      { id: 5, orden: 5, cargo: "VOCAL TITULAR 1°", asociadoId: 1, nombre: "Marcos Álvarez", dni: "32111222", cuil: "20-32111222-6", domicilio: "Rivadavia 310", localidad: "Morón", telefono: "11-4567-5555", email: "marcos.alvarez@email.com", vencimiento: "31/12/2027" },
+      { id: 6, orden: 6, cargo: "VOCAL TITULAR 2°", asociadoId: 8, nombre: "Elena Sánchez", dni: "27999111", cuil: "27-27999111-5", domicilio: "Caseros 650", localidad: "Morón", telefono: "11-8899-6666", email: "elena.sanchez@email.com", vencimiento: "31/12/2027" },
+      { id: 7, orden: 7, cargo: "VOCAL TITULAR 3°", asociadoId: 7, nombre: "Pablo Romero", dni: "30111444", cuil: "20-30111444-2", domicilio: "Alsina 920", localidad: "Morón", telefono: "11-7788-7777", email: "pablo.romero@email.com", vencimiento: "31/12/2027" },
+      { id: 8, orden: 8, cargo: "VOCAL SUPLENTE 1°", asociadoId: 5, nombre: "Diego Martínez", dni: "28777666", cuil: "20-28777666-9", domicilio: "Brown 710", localidad: "Morón", telefono: "11-3344-8888", email: "diego.martinez@email.com", vencimiento: "31/12/2027" },
+      { id: 9, orden: 9, cargo: "VOCAL SUPLENTE 2°", asociadoId: 6, nombre: "Laura Rodríguez", dni: "33444555", cuil: "27-33444555-0", domicilio: "Salta 184", localidad: "Morón", telefono: "11-5566-9999", email: "laura.rodriguez@email.com", vencimiento: "31/12/2027" },
+      { id: 10, orden: 10, cargo: "VOCAL SUPLENTE 3°", asociadoId: 3, nombre: "Santiago Gómez", dni: "34555666", cuil: "20-34555666-3", domicilio: "Jujuy 530", localidad: "Morón", telefono: "11-2233-0000", email: "santiago.gomez@email.com", vencimiento: "31/12/2027" },
       { id: 11, orden: 11, cargo: "REV. CTAS. TITULAR 1°", nombre: "Patricia Benítez", dni: "24111333", cuil: "27-24111333-2", domicilio: "Colón 230", localidad: "Morón", telefono: "11-4455-1234", email: "patricia.benitez@email.com", vencimiento: "31/12/2027" },
       { id: 12, orden: 12, cargo: "REV. CTAS. TITULAR 2°", nombre: "Gonzalo Morales", dni: "26555444", cuil: "20-26555444-7", domicilio: "25 de Mayo 415", localidad: "Morón", telefono: "11-5566-2345", email: "gonzalo.morales@email.com", vencimiento: "31/12/2027" },
       { id: 13, orden: 13, cargo: "REV. CTAS. TITULAR DOC.", nombre: "Claudia Navarro", dni: "23888999", cuil: "27-23888999-6", domicilio: "Sucre 890", localidad: "Morón", telefono: "11-6677-3456", email: "claudia.navarro@email.com", vencimiento: "31/12/2027" },
@@ -802,6 +834,9 @@ export const api = {
         fechaGeneracion: "2026-10-01 10:30",
         generadoPor: "Carlos Gómez",
         archivoPdf: "nomina_comision_2026.pdf",
+        aprobado: 0,
+        aprobadoPor: null,
+        aprobadoEn: null,
         datosJson: JSON.stringify({
           ejercicio: "2026",
           distrito: "Morón",
@@ -818,6 +853,9 @@ export const api = {
         fechaGeneracion: "2026-10-10 14:15",
         generadoPor: "Roberto Fernández",
         archivoPdf: "pia_cooperadoras_2026.pdf",
+        aprobado: 0,
+        aprobadoPor: null,
+        aprobadoEn: null,
         datosJson: JSON.stringify({
           ejercicio: "2026",
           distrito: "Morón",
@@ -842,7 +880,14 @@ export const api = {
       generadoPor: "Usuario",
       archivoPdf: `${params.tipo.toLowerCase()}_${Date.now()}.pdf`,
       datosJson: params.datosJson,
+      aprobado: 0,
+      aprobadoPor: null,
+      aprobadoEn: null,
     };
+  },
+
+  aprobarDocumentoAsamblea: async (id: number): Promise<void> => {
+    if (isTauri) return invoke<void>("aprobar_documento_asamblea", { id });
   },
 
   eliminarDocumentoAsamblea: async (id: number): Promise<void> => {

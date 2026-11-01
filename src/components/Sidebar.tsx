@@ -15,6 +15,7 @@ const ITEMS: { route: Route; label: string | [string, string]; labelText: string
   { route: "documentacion", label: ["Documentación", "Asambleas"], labelText: "Documentación Asambleas" },
   { route: "comision", label: ["Comisión", "Directiva"], labelText: "Comisión Directiva" },
   { route: "usuarios", label: "Usuarios y respaldo", labelText: "Usuarios y respaldo" },
+  { route: "historial", label: "Historial", labelText: "Historial de cambios" },
 ];
 
 export default function Sidebar() {
@@ -24,7 +25,7 @@ export default function Sidebar() {
     // Superadmin tiene acceso a todo
     if (usuario.rol === "Superadmin") return true;
 
-    // Usuarios y respaldo es exclusivo de Superadmin
+    // Usuarios y respaldo es exclusivo del Superadmin.
     if (it.route === "usuarios") return false;
 
     // Secretaria: gestión institucional (Asociados, Reuniones, Documentación, Comisión Directiva)
@@ -33,15 +34,18 @@ export default function Sidebar() {
       return ["inicio", "asociados", "reuniones", "documentacion", "comision"].includes(it.route);
     }
 
-    // Tesorero: gestión financiera y económica (Cuotas, Caja, Rendiciones, Documentación)
+    // Tesorero: gestión financiera y económica (Cuotas, Caja, Rendiciones)
     // NO administra el padrón de asociados ni reuniones institucionales
     if (usuario.rol === "Tesorero") {
-      return ["inicio", "cuotas", "caja", "rendiciones", "documentacion"].includes(it.route);
+      return ["inicio", "cuotas", "caja", "rendiciones"].includes(it.route);
     }
 
     // Presidente: supervisión y gobierno institucional (Inicio, Asociados [lectura], Caja [lectura], Rendiciones [aprobación], Reuniones, Documentación, Comisión)
     if (usuario.rol === "Presidente") {
       return ["inicio", "asociados", "caja", "reuniones", "rendiciones", "documentacion", "comision"].includes(it.route);
+    }
+    if (usuario.rol === "Asesor") {
+      return it.route !== "historial";
     }
 
     return true;

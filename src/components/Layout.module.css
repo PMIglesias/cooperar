@@ -19,6 +19,13 @@
   padding: var(--space-8) var(--space-9); overflow-y: auto;
   scrollbar-gutter: stable;
 }
+.contentFlushTop {
+  padding-top: 0;
+  padding-bottom: 0;
+}
+.contentNoOverflow {
+  overflow: hidden;
+}
 .footer {
   padding: var(--space-3) var(--space-9);
   background: var(--color-surface);

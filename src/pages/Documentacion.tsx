@@ -7,7 +7,7 @@ import Badge from "../components/ui/Badge";
 import DataTable, { Column } from "../components/ui/DataTable";
 import ConfirmDialog from "../components/ui/ConfirmDialog";
 import IconButton from "../components/ui/IconButton";
-import { EyeIcon, TrashIcon, PrinterIcon } from "../components/icons";
+import { EyeIcon, TrashIcon, PrinterIcon, CheckIcon } from "../components/icons";
 import {
   api,
   DocumentoAsambleaFila,
@@ -30,6 +30,8 @@ type Vista = "listado" | "visor";
 export default function Documentacion() {
   const { usuario } = useApp();
   const puedeEliminar = usuario.rol === "Secretaria" || usuario.rol === "Superadmin";
+  const puedeGenerar = usuario.rol === "Secretaria" || usuario.rol === "Superadmin";
+  const puedeAprobar = usuario.rol === "Secretaria" || usuario.rol === "Presidente" || usuario.rol === "Superadmin";
   const [vista, setVista] = useState<Vista>("listado");
   const [documentos, setDocumentos] = useState<DocumentoAsambleaFila[]>([]);
   const [comision, setComision] = useState<MiembroComisionFila[]>([]);
@@ -327,6 +329,18 @@ export default function Documentacion() {
     }
   };
 
+  const handleAprobarDocumento = async (doc: DocumentoAsambleaFila) => {
+    try {
+      await api.aprobarDocumentoAsamblea(doc.id);
+      setDocumentos((prev) => prev.map((item) => item.id === doc.id
+        ? { ...item, aprobado: 1, aprobadoPor: usuario.nombre, aprobadoEn: new Date().toLocaleString("es-AR") }
+        : item));
+      setMensajeExito("Documento aprobado correctamente.");
+    } catch (err: any) {
+      setError(err?.message || "Error al aprobar el documento");
+    }
+  };
+
   const columns: Column<DocumentoAsambleaFila>[] = [
     { header: "Fecha", minWidth: 120, flex: true, render: (doc) => doc.fechaGeneracion },
     {
@@ -348,6 +362,12 @@ export default function Documentacion() {
     { header: "Período", minWidth: 100, flex: true, render: (doc) => doc.periodo },
     { header: "Generado por", minWidth: 160, flex: true, render: (doc) => doc.generadoPor },
     {
+      header: "Estado",
+      minWidth: 110,
+      flex: true,
+      render: (doc) => <Badge tone={doc.aprobado === 1 ? "ok" : "warn"}>{doc.aprobado === 1 ? "Aprobado" : "Pendiente"}</Badge>,
+    },
+    {
       header: "Acciones",
       width: 95,
       align: "center",
@@ -363,6 +383,18 @@ export default function Documentacion() {
               handleVerPdfHistorico(doc);
             }}
           />
+          {puedeAprobar && doc.aprobado !== 1 && (
+            <IconButton
+              icon={<CheckIcon size={16} />}
+              title="Aprobar documento"
+              variant="success"
+              square
+              onClick={(e) => {
+                e.stopPropagation();
+                handleAprobarDocumento(doc);
+              }}
+            />
+          )}
           {puedeEliminar && (
             <IconButton
               icon={<TrashIcon size={16} />}
@@ -396,21 +428,23 @@ export default function Documentacion() {
             ← Volver al listado
           </Button>
         ) : (
-          <div style={{ display: "flex", gap: "var(--space-4)" }}>
-            <Button
-              variant="secondary"
-              disabled={generando || loading}
-              onClick={handleGenerarNomina}
-            >
-              {generando ? "Generando..." : "+ Generar Nómina Comisión"}
-            </Button>
-            <Button
-              disabled={generando || loading}
-              onClick={handleGenerarPia}
-            >
-              {generando ? "Generando..." : "+ Generar P.I.A."}
-            </Button>
-          </div>
+          puedeGenerar ? (
+            <div style={{ display: "flex", gap: "var(--space-4)" }}>
+              <Button
+                variant="secondary"
+                disabled={generando || loading}
+                onClick={handleGenerarNomina}
+              >
+                {generando ? "Generando..." : "+ Generar Nómina Comisión"}
+              </Button>
+              <Button
+                disabled={generando || loading}
+                onClick={handleGenerarPia}
+              >
+                {generando ? "Generando..." : "+ Generar P.I.A."}
+              </Button>
+            </div>
+          ) : null
         )
       }
     >

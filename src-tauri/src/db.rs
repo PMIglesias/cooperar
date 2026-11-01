@@ -2,18 +2,19 @@
 use argon2::password_hash::{PasswordHash, PasswordHasher, PasswordVerifier, SaltString};
 use argon2::Argon2;
 use rand_core::OsRng;
-use rusqlite::Connection;
+use rusqlite::{Connection, OptionalExtension};
 use std::path::Path;
 
 const SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS usuarios(
   id INTEGER PRIMARY KEY, nombre TEXT NOT NULL, dni TEXT UNIQUE, email TEXT UNIQUE,
-  rol TEXT NOT NULL CHECK(rol IN ('Presidente','Secretaria','Tesorero','Superadmin')),
+  rol TEXT NOT NULL CHECK(rol IN ('Presidente','Secretaria','Tesorero','Superadmin','Asesor')),
   clave_hash TEXT NOT NULL, activo INTEGER NOT NULL DEFAULT 1);
 CREATE TABLE IF NOT EXISTS asociados(
   id INTEGER PRIMARY KEY, apellido_nombre TEXT NOT NULL, dni TEXT NOT NULL UNIQUE,
   telefono TEXT, email TEXT, fecha_alta TEXT NOT NULL DEFAULT (date('now','localtime')),
-  exento INTEGER NOT NULL DEFAULT 0, activo INTEGER NOT NULL DEFAULT 1);
+  exento INTEGER NOT NULL DEFAULT 0, activo INTEGER NOT NULL DEFAULT 1,
+  tipo_vinculo TEXT NOT NULL DEFAULT 'PADRE_TUTOR');
 CREATE TABLE IF NOT EXISTS alumnos(
   id INTEGER PRIMARY KEY, asociado_id INTEGER NOT NULL REFERENCES asociados(id) ON DELETE CASCADE,
   nombre TEXT NOT NULL, curso TEXT NOT NULL);
@@ -39,6 +40,14 @@ CREATE TABLE IF NOT EXISTS rendiciones(
   estado TEXT NOT NULL DEFAULT 'Borrador' CHECK(estado IN ('Borrador','Aprobada')),
   aprobada_por INTEGER REFERENCES usuarios(id), aprobada_en TEXT, pdf TEXT);
 CREATE TABLE IF NOT EXISTS configuracion(clave TEXT PRIMARY KEY, valor TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS auditoria(
+  id INTEGER PRIMARY KEY,
+  usuario_id INTEGER REFERENCES usuarios(id),
+  fecha_hora TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+  accion TEXT NOT NULL,
+  entidad TEXT NOT NULL,
+  entidad_id INTEGER
+);
 
 CREATE TABLE IF NOT EXISTS personal_establecimiento(
   id INTEGER PRIMARY KEY,
@@ -63,6 +72,7 @@ CREATE TABLE IF NOT EXISTS comision_directiva(
   telefono TEXT NOT NULL,
   email TEXT NOT NULL,
   vencimiento TEXT NOT NULL
+  ,personal_establecimiento_id INTEGER REFERENCES personal_establecimiento(id) ON DELETE SET NULL
 );
 
 CREATE TABLE IF NOT EXISTS documentos_asambleas(
@@ -73,7 +83,10 @@ CREATE TABLE IF NOT EXISTS documentos_asambleas(
   fecha_generacion TEXT NOT NULL,
   generado_por TEXT NOT NULL,
   archivo_pdf TEXT NOT NULL,
-  datos_json TEXT NOT NULL
+  datos_json TEXT NOT NULL,
+  aprobado INTEGER NOT NULL DEFAULT 0,
+  aprobado_por TEXT,
+  aprobado_en TEXT
 );
 
 DROP VIEW IF EXISTS v_asociados;
@@ -116,7 +129,56 @@ pub fn init(dir: &Path) -> Result<Connection, Box<dyn std::error::Error>> {
     let _ = conn.execute("ALTER TABLE movimientos_caja ADD COLUMN registrado_por INTEGER REFERENCES usuarios(id)", []);
     let _ = conn.execute("ALTER TABLE reuniones ADD COLUMN registrado_por INTEGER REFERENCES usuarios(id)", []);
     let _ = conn.execute("ALTER TABLE comision_directiva ADD COLUMN asociado_id INTEGER REFERENCES asociados(id) ON DELETE SET NULL", []);
+    let _ = conn.execute("ALTER TABLE comision_directiva ADD COLUMN personal_establecimiento_id INTEGER REFERENCES personal_establecimiento(id) ON DELETE SET NULL", []);
+    let _ = conn.execute("ALTER TABLE asociados ADD COLUMN tipo_vinculo TEXT NOT NULL DEFAULT 'PADRE_TUTOR'", []);
+    let _ = conn.execute("ALTER TABLE documentos_asambleas ADD COLUMN aprobado INTEGER NOT NULL DEFAULT 0", []);
+    let _ = conn.execute("ALTER TABLE documentos_asambleas ADD COLUMN aprobado_por TEXT", []);
+    let _ = conn.execute("ALTER TABLE documentos_asambleas ADD COLUMN aprobado_en TEXT", []);
     let _ = conn.execute("UPDATE pagos SET anulado = 0 WHERE anulado IS NULL", []);
+
+    let usuarios_sql: Option<String> = conn
+        .query_row(
+            "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'usuarios'",
+            [],
+            |r| r.get(0),
+        )
+        .optional()?;
+    if let Some(sql) = usuarios_sql {
+        if !sql.contains("'Asesor'") {
+            conn.execute_batch(
+                "PRAGMA foreign_keys = OFF;
+                 ALTER TABLE usuarios RENAME TO usuarios_legacy;
+                 CREATE TABLE usuarios(
+                   id INTEGER PRIMARY KEY, nombre TEXT NOT NULL, dni TEXT UNIQUE, email TEXT UNIQUE,
+                   rol TEXT NOT NULL CHECK(rol IN ('Presidente','Secretaria','Tesorero','Superadmin','Asesor')),
+                   clave_hash TEXT NOT NULL, activo INTEGER NOT NULL DEFAULT 1
+                 );
+                 INSERT INTO usuarios(id, nombre, dni, email, rol, clave_hash, activo)
+                   SELECT id, nombre, dni, email, rol, clave_hash, activo FROM usuarios_legacy;
+                 DROP TABLE usuarios_legacy;
+                 PRAGMA foreign_keys = ON;",
+            )?;
+        }
+    }
+
+    // Algunas bases existentes conservaron FKs internas hacia usuarios_legacy
+    // al migrar la restricción del rol. Mantener la tabla espejo evita que
+    // operaciones sobre esas tablas fallen mientras se conservan sus IDs.
+    let referencias_legacy: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM sqlite_master WHERE sql LIKE '%usuarios_legacy%'",
+        [],
+        |r| r.get(0),
+    )?;
+    if referencias_legacy > 0 {
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS usuarios_legacy(
+               id INTEGER PRIMARY KEY, nombre TEXT NOT NULL, dni TEXT UNIQUE, email TEXT UNIQUE,
+               rol TEXT NOT NULL, clave_hash TEXT NOT NULL, activo INTEGER NOT NULL DEFAULT 1
+             );
+             INSERT OR IGNORE INTO usuarios_legacy(id, nombre, dni, email, rol, clave_hash, activo)
+               SELECT id, nombre, dni, email, rol, clave_hash, activo FROM usuarios;",
+        )?;
+    }
 
     conn.execute_batch(SCHEMA)?;
     let _ = conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_pagos_asociado_periodo_activo ON pagos(asociado_id, periodo) WHERE anulado=0", []);
@@ -255,6 +317,20 @@ pub fn init(dir: &Path) -> Result<Connection, Box<dyn std::error::Error>> {
              ('Docente de Grado', 'Silvia Peralta', '22444111', '11-8899-5678', 'silvia.peralta@email.com', 'REV_CTAS_DOC_SUP')",
             [],
         )?;
+    }
+
+    let asesor_existe: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM usuarios WHERE rol='Asesor' AND dni=(SELECT dni FROM comision_directiva WHERE cargo='ASESOR' LIMIT 1)",
+        [],
+        |r| r.get(0),
+    ).unwrap_or(0);
+    if asesor_existe == 0 {
+        let clave_hash = hash("admin123");
+        let _ = conn.execute(
+            "INSERT OR IGNORE INTO usuarios(nombre, dni, email, rol, clave_hash) \
+             SELECT nombre, dni, NULL, 'Asesor', ?1 FROM comision_directiva WHERE cargo='ASESOR' LIMIT 1",
+            [&clave_hash],
+        );
     }
     let configuraciones_base = [
         ("monto_cuota", "8000"),
