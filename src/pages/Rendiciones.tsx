@@ -61,9 +61,14 @@ export default function Rendiciones() {
   const lineasEgreso = detalle.filter((l) => l.tipo === "Egreso");
 
   const abrirNuevaRendicion = () => {
-    setPeriodo("3° Trimestre 2026");
-    setDesde("2026-07-01");
-    setHasta("2026-09-30");
+    const hoy = new Date();
+    const year = hoy.getFullYear();
+    const yearPrev = year - 1;
+    const yearShort = year.toString().slice(-2);
+    const todayStr = hoy.toISOString().split("T")[0];
+    setPeriodo(`Rendición Anual Periodo ${yearPrev}-${yearShort}`);
+    setDesde(`${year}-01-01`);
+    setHasta(todayStr);
     setError(null);
     setVista("nuevo");
   };
@@ -193,37 +198,24 @@ export default function Rendiciones() {
   const columns: Column<RendicionFila>[] = [
     {
       header: "Período",
-      minWidth: 120,
+      minWidth: 140,
       flex: true,
       render: (r) => <strong>{r.periodo}</strong>,
     },
-    {
-      header: "Rango de fechas",
-      minWidth: 160,
-      flex: true,
-      render: (r) => (
-        <span>
-          {r.desde} al {r.hasta}
-        </span>
-      ),
-    },
-    { header: "Generada el", minWidth: 110, flex: true, render: (r) => r.generadaEn },
+    { header: "Generada el", width: 100, render: (r) => r.generadaEn },
     {
       header: "Ingresos",
-      minWidth: 105,
-      flex: true,
+      width: 130,
       render: (r) => <span style={{ color: "var(--color-ok)", fontWeight: 600 }}>+ {money(r.totalIngresos)}</span>,
     },
     {
       header: "Egresos",
-      minWidth: 105,
-      flex: true,
+      width: 130,
       render: (r) => <span style={{ color: "var(--color-danger)", fontWeight: 600 }}>- {money(r.totalEgresos)}</span>,
     },
     {
       header: "Saldo",
-      minWidth: 110,
-      flex: true,
+      width: 130,
       render: (r) => (
         <strong style={{ color: r.saldoPeriodo >= 0 ? "var(--color-ok)" : "var(--color-danger)" }}>
           {money(r.saldoPeriodo)}
@@ -232,8 +224,7 @@ export default function Rendiciones() {
     },
     {
       header: "Estado",
-      minWidth: 100,
-      flex: true,
+      width: 100,
       render: (r) => (
         <Badge tone={r.estado === "Aprobada" ? "ok" : "warn"}>
           {r.estado === "Aprobada" ? "Aprobada" : "Borrador"}

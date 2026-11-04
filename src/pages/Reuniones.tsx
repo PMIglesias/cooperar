@@ -290,6 +290,8 @@ Presidente                  Secretario/a`;
     return (
       <Layout
         title="Reuniones › Programar reunión"
+        flushContentTop
+        hideContentOverflow
         action={
           <Button variant="secondary" onClick={() => setVista("lista")}>
             ← Volver al listado
@@ -299,7 +301,7 @@ Presidente                  Secretario/a`;
         <form onSubmit={guardarReunion} className={s.formContainer}>
           {errorReunion && <div className={s.errorMsg}>{errorReunion}</div>}
 
-          <Card title="Detalles de la convocatoria">
+          <Card className={s.actaCard} title="Detalles de la convocatoria">
             <div className={s.formFields}>
               <div className={s.formRow}>
                 <Field
@@ -319,15 +321,17 @@ Presidente                  Secretario/a`;
                 />
               </div>
 
-              <div>
-                <Field
-                  label="Temas a tratar / Orden del día"
-                  placeholder="Ej: 1. Aprobación de balance mensual. 2. Presupuesto reparación de techos. 3. Organización festival."
-                  value={temas}
-                  onChange={(e) => setTemas(e.target.value)}
-                  width="100%"
-                  required
-                />
+              <div className={s.ordenDelDia}>
+                <label className={s.ordenLabel}>
+                  <span>Temas a tratar / Orden del día</span>
+                  <textarea
+                    className={s.ordenTextarea}
+                    placeholder="Ej: 1. Aprobación de balance mensual. 2. Presupuesto reparación de techos. 3. Organización festival."
+                    value={temas}
+                    onChange={(e) => setTemas(e.target.value)}
+                    required
+                  />
+                </label>
               </div>
             </div>
           </Card>
@@ -355,6 +359,8 @@ Presidente                  Secretario/a`;
   return (
     <Layout
       title="Reuniones › Libro de actas"
+      flushContentTop
+      hideContentOverflow
       action={
         <div style={{ display: "flex", gap: "var(--space-4)" }}>
           <Button variant="secondary" onClick={imprimirActa} style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}>
@@ -367,10 +373,10 @@ Presidente                  Secretario/a`;
       }
     >
       {reunionActa && (
-        <div className={s.formContainer}>
+        <div className={s.actaContainer}>
           {errorActa && <div className={s.errorMsg}>{errorActa}</div>}
 
-          <Card>
+          <Card className={s.actaCard}>
             <div className={s.actaHeader}>
               <div className={s.actaMeta}>
                 <span className={s.actaTitle}>
@@ -386,7 +392,7 @@ Presidente                  Secretario/a`;
             </div>
 
             <textarea
-              className={s.actaTextarea}
+              className={s.actaTextareaActa}
               value={textoActa}
               readOnly={!puedeAdministrar}
               onChange={(e) => setTextoActa(e.target.value)}
@@ -463,7 +469,7 @@ Presidente                  Secretario/a`;
             </div>
           </Card>
 
-          <div className={s.actionRow}>
+          <div className={s.actaActionRow}>
             {puedeAdministrar && (
               <Button onClick={guardarActa} disabled={savingActa}>
                 {savingActa ? "Guardando..." : "Guardar acta oficial"}

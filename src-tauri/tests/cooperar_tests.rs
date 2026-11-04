@@ -104,6 +104,7 @@ fn test_cross_data_integrity_asociado_comision_and_caja_pagos() {
         dni: "32111222".to_string(),
         telefono: Some("11-9999-8888".to_string()),
         email: Some("marcos.nuevo@test.com".to_string()),
+        tipo_vinculo: "Docente".to_string(),
         alumnos: vec![commands::NuevoAlumno {
             nombre: "Lucía Álvarez Ramos".to_string(),
             curso: "3° A".to_string(),
@@ -143,6 +144,8 @@ fn test_cross_data_integrity_asociado_comision_and_caja_pagos() {
         monto: 8000,
         medio: "Efectivo".to_string(),
         comprobante: Some("REC-TEST-999".to_string()),
+        adjunto_nombre: None,
+        adjunto_datos: None,
     };
 
     // Llamar a registrar_pago_interno
@@ -291,6 +294,8 @@ fn test_pagos_duplicate_and_amount_validations() {
         monto: 0,
         medio: "Efectivo".to_string(),
         comprobante: None,
+        adjunto_nombre: None,
+        adjunto_datos: None,
     };
     let err_monto = commands::registrar_pago_interno(&mut conn, &pago_invalido, 4);
     assert!(err_monto.is_err(), "No se debe permitir registrar un pago con monto <= 0");
@@ -302,6 +307,8 @@ fn test_pagos_duplicate_and_amount_validations() {
         monto: 8000,
         medio: "Transferencia".to_string(),
         comprobante: Some("TRF-001".to_string()),
+        adjunto_nombre: None,
+        adjunto_datos: None,
     };
     let pago_id = commands::registrar_pago_interno(&mut conn, &pago_valido, 4).expect("Registro de pago legítimo");
     assert!(pago_id > 0);
@@ -313,6 +320,8 @@ fn test_pagos_duplicate_and_amount_validations() {
         monto: 8000,
         medio: "Efectivo".to_string(),
         comprobante: Some("REC-DUPLICADO".to_string()),
+        adjunto_nombre: None,
+        adjunto_datos: None,
     };
     let err_duplicado = commands::registrar_pago_interno(&mut conn, &pago_duplicado, 4);
     assert!(err_duplicado.is_err(), "Se debe rechazar un pago duplicado para el mismo período");

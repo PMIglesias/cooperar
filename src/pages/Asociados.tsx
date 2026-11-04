@@ -470,6 +470,7 @@ export default function Asociados() {
     return (
       <Layout
         title="Asociados"
+        hideContentOverflow
         action={
           <div style={{ display: "flex", gap: "var(--space-3)" }}>
             {puedeAdministrar && <Button onClick={abrirNuevoForm}>+ Nuevo asociado</Button>}
@@ -520,18 +521,16 @@ export default function Asociados() {
           />
         </div>
 
-        <p className={s.summary}>
-          {resumen &&
-            `${resumen.activos} asociados activos · ${resumen.conDeuda} con deuda · ${resumen.exentos} exentos`}
-        </p>
-
-        <DataTable
-          columns={COLUMNS}
-          rows={rows}
-          rowKey={(a) => a.id}
-          onRowClick={(a) => abrirFicha(a.id)}
-          emptyMessage="No se encontraron asociados con los filtros aplicados."
-        />
+        <div className={s.tableWrapper}>
+          <DataTable
+            columns={COLUMNS}
+            rows={rows}
+            rowKey={(a) => a.id}
+            onRowClick={(a) => abrirFicha(a.id)}
+            stickyHeader
+            emptyMessage="No se encontraron asociados con los filtros aplicados."
+          />
+        </div>
 
         {/* Modal de Configuración de Columnas para Listado Personalizado */}
         <Modal

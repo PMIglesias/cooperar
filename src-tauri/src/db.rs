@@ -180,6 +180,7 @@ pub fn init(dir: &Path) -> Result<Connection, Box<dyn std::error::Error>> {
         )?;
     }
 
+    let _ = conn.execute("PRAGMA foreign_keys = OFF", []);
     conn.execute_batch(SCHEMA)?;
     let _ = conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_pagos_asociado_periodo_activo ON pagos(asociado_id, periodo) WHERE anulado=0", []);
 
@@ -414,4 +415,4 @@ pub fn calcular_cuil_modulo_11(dni_str: &str) -> Option<String> {
         dv = calc_dv(prefijo);
     }
     dv.map(|d| format!("{}-{}-{}", prefijo, padded, d))
-}
+}

@@ -880,7 +880,7 @@ pub fn crear_rendicion(st: State<AppState>, datos: DatosRendicion) -> R<i64> {
     let u = auth_tesorero_o_admin(&st)?;
     let db = st.db.lock().map_err(s)?;
     db.execute(
-        "INSERT INTO rendiciones(periodo, desde, hasta, generada_en, generada_por, estado) VALUES(?1, ?2, ?3, datetime('now','localtime'), ?4, 'Borrador')",
+        "INSERT INTO rendiciones(periodo, desde, hasta, generada_en, generada_por, estado) VALUES(?1, ?2, ?3, date('now','localtime'), ?4, 'Borrador')",
         params![datos.periodo.trim(), datos.desde.trim(), datos.hasta.trim(), u.id],
     ).map_err(s)?;
     let id = db.last_insert_rowid();
@@ -893,7 +893,7 @@ pub fn aprobar_rendicion(st: State<AppState>, id: i64) -> R<()> {
     let u = auth_presidente_o_admin(&st)?;
     let db = st.db.lock().map_err(s)?;
     db.execute(
-        "UPDATE rendiciones SET estado='Aprobada', aprobada_por=?1, aprobada_en=datetime('now','localtime') WHERE id=?2",
+        "UPDATE rendiciones SET estado='Aprobada', aprobada_por=?1, aprobada_en=date('now','localtime') WHERE id=?2",
         params![u.id, id],
     ).map_err(s)?;
     auditar(&db, u.id, "APROBAR", "rendicion", Some(id))?;

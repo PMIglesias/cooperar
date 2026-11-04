@@ -526,7 +526,7 @@ export default function Cuotas() {
         <form onSubmit={guardarPago} className={s.formContainer}>
           {pagoError && <div className={s.errorMsg}>{pagoError}</div>}
 
-          <Card title="Datos del pago">
+          <Card title="Datos del pago" className={s.paymentCard}>
             <div className={s.formFields}>
               {/* Buscador predictivo de Asociado Titular por Nombre, Apellido o DNI */}
               <div className={s.asociadoSearchWrapper}>
@@ -705,20 +705,20 @@ export default function Cuotas() {
                 {pagoAdjuntoNombre && <span className={s.attachmentName}>{pagoAdjuntoNombre}</span>}
               </div>
             </div>
-          </Card>
 
-          <div className={s.actionRow}>
-            <Button type="submit" disabled={pagoSaving}>
-              {pagoSaving ? "Registrando..." : "Confirmar pago"}
-            </Button>
-            <Button
-              variant="secondary"
-              onClick={() => setVista("lista")}
-              disabled={pagoSaving}
-            >
-              Cancelar
-            </Button>
-          </div>
+            <div className={s.actionRow}>
+              <Button type="submit" disabled={pagoSaving}>
+                {pagoSaving ? "Registrando..." : "Confirmar pago"}
+              </Button>
+              <Button
+                variant="secondary"
+                onClick={() => setVista("lista")}
+                disabled={pagoSaving}
+              >
+                Cancelar
+              </Button>
+            </div>
+          </Card>
         </form>
       </Layout>
     );

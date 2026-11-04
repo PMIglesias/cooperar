@@ -96,9 +96,9 @@ export default function Caja() {
     cargarDatos();
   }, [tipoFiltro, catFiltro, busqueda]);
 
-  const abrirNuevoMovimiento = (defaultTipo: "Ingreso" | "Egreso" = "Egreso") => {
-    setTipo(defaultTipo);
-    setCategoria(defaultTipo === "Ingreso" ? CATEGORIAS_INGRESO[0] : CATEGORIAS_EGRESO[0]);
+  const abrirNuevoMovimiento = () => {
+    setTipo("Egreso");
+    setCategoria(CATEGORIAS_EGRESO[0]);
     setDescripcion("");
     setMonto("");
     setComprobante("");
@@ -333,14 +333,9 @@ export default function Caja() {
         title="Caja"
         action={
           puedeOperarCaja ? (
-            <div style={{ display: "flex", gap: "var(--space-4)" }}>
-              <Button variant="secondary" onClick={() => abrirNuevoMovimiento("Ingreso")}>
-                + Nuevo ingreso
-              </Button>
-              <Button onClick={() => abrirNuevoMovimiento("Egreso")}>
-                - Nuevo egreso
-              </Button>
-            </div>
+            <Button onClick={abrirNuevoMovimiento}>
+              + Nuevo movimiento
+            </Button>
           ) : undefined
         }
       >
@@ -633,42 +628,59 @@ export default function Caja() {
           ← Volver a caja
         </Button>
       }
+      flushContentTop
+      hideContentOverflow
     >
       <form onSubmit={guardarMovimiento} className={s.formContainer}>
         {error && <div className={s.errorMsg}>{error}</div>}
 
-        <Card title="Datos del movimiento">
+        <Card title="Datos del movimiento" className={s.formCard}>
           <div className={s.formFields}>
-            <div className={s.formRow}>
-              <SelectField
-                label="Tipo de movimiento"
-                value={tipo}
-                options={["Ingreso", "Egreso"]}
-                onChange={(v) => {
-                  const t = v as "Ingreso" | "Egreso";
-                  setTipo(t);
-                  setCategoria(t === "Ingreso" ? CATEGORIAS_INGRESO[0] : CATEGORIAS_EGRESO[0]);
-                }}
-                width={200}
-              />
-              <SelectField
-                label="Categoría"
-                value={categoria}
-                options={tipo === "Ingreso" ? CATEGORIAS_INGRESO : CATEGORIAS_EGRESO}
-                onChange={setCategoria}
-                width={300}
-                required
-              />
-            </div>
+            {/* Two-word switch: Tipo de movimiento */}
+            <label className={s.field}>
+              <span className={s.label}>Tipo de movimiento</span>
+              <div className={s.typeSwitch}>
+                <button
+                  type="button"
+                  className={`${s.switchBtn} ${tipo === "Ingreso" ? s.switchBtnActive : ""}`}
+                  onClick={() => {
+                    setTipo("Ingreso");
+                    setCategoria(CATEGORIAS_INGRESO[0]);
+                  }}
+                >
+                  Ingreso
+                </button>
+                <button
+                  type="button"
+                  className={`${s.switchBtn} ${tipo === "Egreso" ? s.switchBtnActive : ""}`}
+                  onClick={() => {
+                    setTipo("Egreso");
+                    setCategoria(CATEGORIAS_EGRESO[0]);
+                  }}
+                >
+                  Egreso
+                </button>
+              </div>
+            </label>
 
-            <Field
-              label="Descripción"
-              placeholder={tipo === "Ingreso" ? "Ej: Buffet acto escolar día del maestro" : "Ej: Compra de pintura y pinceles"}
-              value={descripcion}
-              onChange={(e) => setDescripcion(e.target.value)}
-              width="100%"
+            <SelectField
+              label="Categoría"
+              value={categoria}
+              options={tipo === "Ingreso" ? CATEGORIAS_INGRESO : CATEGORIAS_EGRESO}
+              onChange={setCategoria}
               required
             />
+
+            <label className={`${s.field} ${s.fieldGrow}`}>
+              <span className={s.label}>Descripción</span>
+              <textarea
+                className={s.control}
+                placeholder={tipo === "Ingreso" ? "Ej: Buffet acto escolar día del maestro" : "Ej: Compra de pintura y pinceles"}
+                value={descripcion}
+                onChange={(e) => setDescripcion(e.target.value)}
+                required
+              />
+            </label>
 
             <div className={s.formRow} style={{ alignItems: "flex-end" }}>
               <Field
@@ -679,7 +691,6 @@ export default function Caja() {
                 placeholder="0"
                 value={monto}
                 onChange={(e) => setMonto(e.target.value)}
-                width={200}
                 required
               />
               <div className={s.voucherContainer}>
@@ -688,7 +699,6 @@ export default function Caja() {
                   placeholder="Ej: FAC-B-0001-00042"
                   value={comprobante}
                   onChange={(e) => setComprobante(e.target.value)}
-                  width={260}
                 />
                 <div>
                   <input

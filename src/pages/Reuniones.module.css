@@ -32,13 +32,18 @@
   display: flex;
   flex-direction: column;
   gap: var(--space-6);
-  max-width: 800px;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--space-8);
 }
 
 .formFields {
   display: flex;
   flex-direction: column;
   gap: var(--space-4);
+  flex: 1 1 auto;
+  min-height: 0;
 }
 
 .formRow {
@@ -47,10 +52,46 @@
   gap: var(--space-5);
 }
 
+/* Orden del día — textarea que llena todo el espacio disponible */
+.ordenDelDia {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+}
+
+.ordenLabel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.ordenTextarea {
+  flex: 1 1 auto;
+  min-height: 200px;
+  width: 100%;
+  padding: var(--space-4);
+  font-family: inherit;
+  font-size: var(--fs-base);
+  line-height: 1.6;
+  border: 1px solid var(--color-border-field);
+  border-radius: var(--radius);
+  background: var(--color-surface);
+  color: var(--color-text);
+  resize: vertical;
+  box-sizing: border-box;
+  overflow-y: auto;
+}
+
+.ordenTextarea:focus {
+  outline: 2px solid var(--color-primary);
+}
+
 .actionRow {
   display: flex;
   gap: var(--space-4);
-  margin-top: var(--space-2);
+  margin-top: auto;
 }
 
 .errorMsg {
@@ -59,6 +100,49 @@
   background: var(--color-danger-bg);
   padding: var(--space-4);
   border-radius: var(--radius);
+}
+
+/* Pantalla Acta — contenedor que ocupa todo el alto */
+.actaCard {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.actaContainer {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.actaTextareaActa {
+  flex: 1 1 auto;
+  min-height: 200px;
+  width: 100%;
+  padding: var(--space-4);
+  font-family: inherit;
+  font-size: var(--fs-base);
+  line-height: 1.6;
+  border: 1px solid var(--color-border-field);
+  border-radius: var(--radius);
+  background: var(--color-surface);
+  color: var(--color-text);
+  resize: vertical;
+  box-sizing: border-box;
+  overflow-y: auto;
+}
+
+.actaTextareaActa:focus {
+  outline: 2px solid var(--color-primary);
+}
+
+.actaActionRow {
+  display: flex;
+  gap: var(--space-4);
+  flex-shrink: 0;
+  margin-top: auto;
+  padding-bottom: var(--space-6);
 }
 
 /* Pantalla Acta */
