@@ -126,7 +126,8 @@ export default function ComisionDirectiva() {
       setMensajeExito(`Autoridad "${miembroEditando.cargo}" actualizada con éxito.`);
       setMiembroEditando(null);
     } catch (err: any) {
-      setError(err?.message || "Error al actualizar autoridad");
+      // El núcleo rechaza con un texto (p. ej., un directivo en un cargo de la comisión)
+      setError(typeof err === "string" ? err : err?.message || "Error al actualizar autoridad");
     }
   };
 
@@ -150,7 +151,7 @@ export default function ComisionDirectiva() {
       setMensajeExito(`Personal "${guardado.nombre}" guardado y vinculado correctamente.`);
       setPersonalEditando(null);
     } catch (err: any) {
-      setError(err?.message || "Error al guardar personal");
+      setError(typeof err === "string" ? err : err?.message || "Error al guardar personal");
     }
   };
 
@@ -332,9 +333,17 @@ export default function ComisionDirectiva() {
 
   const tipoVinculacionAutoridad = tipoVinculacionSeleccionado;
 
+  // El personal de la escuela sólo puede ser asesor o revisor de cuentas docente; los cargos
+  // de la comisión (presidencia a vocales) corresponden a los asociados. El núcleo también lo valida.
+  const esCargoDeComision = (cargo: string) => {
+    const c = cargo.toUpperCase();
+    return !c.startsWith("REV") && !c.includes("ASESOR");
+  };
+  const cargoEditandoEsDeComision = miembroEditando ? esCargoDeComision(miembroEditando.cargo) : false;
+
   const opcionesTiposVinculacion = [
     { value: "ASOCIADO", label: "Asociado cooperadora" },
-    { value: "PERSONAL", label: "Directivo/personal escolar" },
+    ...(cargoEditandoEsDeComision ? [] : [{ value: "PERSONAL", label: "Directivo/personal escolar" }]),
     { value: "MANUAL", label: "Manual" },
   ];
 
@@ -347,6 +356,7 @@ export default function ComisionDirectiva() {
   const textoBusqueda = normalizarBusqueda(busquedaVinculacion);
   const asociadosVinculacion = asociados
     .filter((a) => {
+      if (cargoEditandoEsDeComision && a.tipoVinculo === "DIRECTIVO_ESCOLAR") return false;
       if (!textoBusqueda) return true;
       return normalizarBusqueda(`${a.apellidoNombre} ${a.dni} ${a.id}`).includes(textoBusqueda);
     })
@@ -1020,6 +1030,11 @@ export default function ComisionDirectiva() {
                   onChange={cambiarTipoVinculacion}
                   width="100%"
                 />
+                {cargoEditandoEsDeComision && (
+                  <p style={{ margin: 0, fontSize: "var(--fs-sm)", color: "var(--color-text-muted)" }}>
+                    El personal directivo de la escuela no puede ocupar este cargo: sólo puede figurar como asesor o revisor de cuentas docente.
+                  </p>
+                )}
                 {tipoVinculacionAutoridad !== "MANUAL" && (
                   <>
                     <div className={s.autocomplete}>

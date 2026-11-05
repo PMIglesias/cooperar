@@ -406,6 +406,103 @@ fn test_rendiciones_balance_calculo() {
 }
 
 #[test]
+fn test_rendicion_anual_detalle_mensual() {
+    let test_dir = PathBuf::from("target").join("test_rendicion_mensual");
+    let _ = fs::remove_dir_all(&test_dir);
+    fs::create_dir_all(&test_dir).expect("Crear dir de test");
+    let conn = db::init(&test_dir).expect("Inicializar base de datos");
+    conn.execute("DELETE FROM movimientos_caja", []).unwrap();
+
+    // Ejercicio mayo 2026 - abril 2027 con movimientos sólo en mayo, octubre y abril
+    conn.execute("INSERT INTO movimientos_caja(fecha, tipo, categoria, descripcion, monto) VALUES('2026-05-03', 'Ingreso', 'Cuotas', 'Cuotas', 30000)", []).unwrap();
+    conn.execute("INSERT INTO movimientos_caja(fecha, tipo, categoria, descripcion, monto) VALUES('2026-10-15', 'Egreso', 'Artículos de Limpieza', 'Limpieza', 8000)", []).unwrap();
+    conn.execute("INSERT INTO movimientos_caja(fecha, tipo, categoria, descripcion, monto, anulado) VALUES('2026-10-16', 'Ingreso', 'Donaciones', 'Anulado', 99999, 1)", []).unwrap();
+    conn.execute("INSERT INTO movimientos_caja(fecha, tipo, categoria, descripcion, monto) VALUES('2027-04-30', 'Ingreso', 'Donaciones', 'Donación', 5000)", []).unwrap();
+    // Fuera del ejercicio: no debe aparecer
+    conn.execute("INSERT INTO movimientos_caja(fecha, tipo, categoria, descripcion, monto) VALUES('2026-04-30', 'Ingreso', 'Cuotas', 'Ejercicio anterior', 70000)", []).unwrap();
+    conn.execute(
+        "INSERT INTO rendiciones(periodo, desde, hasta, generada_en, generada_por) VALUES('Ejercicio 2026/2027', '2026-05-01', '2027-04-30', date('now'), (SELECT id FROM usuarios LIMIT 1))",
+        [],
+    ).unwrap();
+    let id = conn.last_insert_rowid();
+
+    let meses = commands::detalle_mensual_rendicion_interno(&conn, id).expect("Detalle mensual");
+    assert_eq!(meses.len(), 12, "El ejercicio debe tener los 12 meses, de mayo a abril");
+    assert_eq!(meses[0].mes, "2026-05");
+    assert_eq!(meses[11].mes, "2027-04");
+    assert_eq!((meses[0].ingresos, meses[0].egresos), (30000, 0));
+    assert_eq!((meses[5].ingresos, meses[5].egresos), (0, 8000), "Octubre suma el egreso y descarta el anulado");
+    assert_eq!((meses[1].ingresos, meses[1].egresos), (0, 0), "Un mes sin movimientos queda en 0");
+    assert_eq!(meses[11].ingresos, 5000);
+
+    let _ = fs::remove_dir_all(&test_dir);
+}
+
+#[test]
+fn test_movimiento_caja_fecha_real_y_registro() {
+    let test_dir = PathBuf::from("target").join("test_caja_fecha_real");
+    let _ = fs::remove_dir_all(&test_dir);
+    fs::create_dir_all(&test_dir).expect("Crear dir de test");
+    let conn = db::init(&test_dir).expect("Inicializar base de datos");
+
+    let datos = |fecha: Option<&str>| commands::DatosMovimientoCaja {
+        tipo: "Egreso".to_string(),
+        categoria: "Artículos de Limpieza".to_string(),
+        descripcion: "Compra de lavandina".to_string(),
+        monto: 4500,
+        comprobante: None,
+        adjunto_nombre: None,
+        adjunto_datos: None,
+        fecha: fecha.map(str::to_string),
+    };
+
+    // Egreso pagado días antes de cargarlo: la fecha real se guarda aparte de la de registro
+    let id = commands::crear_movimiento_caja_interno(&conn, &datos(Some("2026-01-15")), 1).expect("Movimiento con fecha pasada");
+    let (fecha, registrado_en): (String, String) = conn
+        .query_row("SELECT fecha, registrado_en FROM movimientos_caja WHERE id=?1", params![id], |r| Ok((r.get(0)?, r.get(1)?)))
+        .unwrap();
+    assert_eq!(fecha, "2026-01-15");
+    assert_ne!(registrado_en.get(0..10), Some("2026-01-15"), "La fecha de registro es la de carga en el sistema");
+
+    assert!(commands::crear_movimiento_caja_interno(&conn, &datos(Some("2999-01-01")), 1).is_err(), "No se aceptan fechas futuras");
+    assert!(commands::crear_movimiento_caja_interno(&conn, &datos(Some("2026-02-30")), 1).is_err(), "No se aceptan fechas inexistentes");
+
+    // Sin fecha se toma la del día
+    let id_hoy = commands::crear_movimiento_caja_interno(&conn, &datos(None), 1).expect("Movimiento del día");
+    let es_hoy: bool = conn
+        .query_row("SELECT fecha = date('now','localtime') FROM movimientos_caja WHERE id=?1", params![id_hoy], |r| r.get(0))
+        .unwrap();
+    assert!(es_hoy);
+
+    let _ = fs::remove_dir_all(&test_dir);
+}
+
+#[test]
+fn test_directivo_no_ocupa_cargos_de_comision() {
+    let test_dir = PathBuf::from("target").join("test_directivo_comision");
+    let _ = fs::remove_dir_all(&test_dir);
+    fs::create_dir_all(&test_dir).expect("Crear dir de test");
+    let conn = db::init(&test_dir).expect("Inicializar base de datos");
+
+    conn.execute("INSERT INTO asociados(apellido_nombre, dni, tipo_vinculo) VALUES('Directora, Ana', '17000001', 'DIRECTIVO_ESCOLAR')", []).unwrap();
+    let directora = conn.last_insert_rowid();
+    let miembro = |cargo: &str, asociado_id: Option<i64>, personal_id: Option<i64>| commands::MiembroComisionFila {
+        id: 1, orden: 1, cargo: cargo.to_string(), asociado_id, personal_establecimiento_id: personal_id,
+        nombre: "Ana Directora".to_string(), dni: "17000001".to_string(), cuil: String::new(), domicilio: String::new(),
+        localidad: String::new(), telefono: String::new(), email: String::new(), vencimiento: "31/12/2027".to_string(),
+    };
+
+    assert!(commands::validar_vinculo_comision(&conn, &miembro("PRESIDENTE", Some(directora), None)).is_err());
+    assert!(commands::validar_vinculo_comision(&conn, &miembro("VOCAL TITULAR 1°", None, Some(1))).is_err());
+    assert!(commands::validar_vinculo_comision(&conn, &miembro("ASESOR", None, Some(1))).is_ok());
+    assert!(commands::validar_vinculo_comision(&conn, &miembro("REV. CTAS. TITULAR DOC.", None, Some(1))).is_ok());
+    // Un asociado común sí puede presidir
+    assert!(commands::validar_vinculo_comision(&conn, &miembro("PRESIDENTE", Some(1), None)).is_ok());
+
+    let _ = fs::remove_dir_all(&test_dir);
+}
+
+#[test]
 fn test_db_migration_from_legacy_schema() {
     let test_dir = PathBuf::from("target").join("test_legacy_migration");
     let _ = fs::remove_dir_all(&test_dir);
@@ -443,6 +540,45 @@ fn test_db_migration_from_legacy_schema() {
             .unwrap();
         assert_eq!(existe, 1, "La migración debe agregar {}.{}", tabla, columna);
     }
+
+    let _ = fs::remove_dir_all(&test_dir);
+}
+
+#[test]
+fn test_reparacion_fks_hacia_usuarios_legacy() {
+    let test_dir = PathBuf::from("target").join("test_reparacion_legacy");
+    let _ = fs::remove_dir_all(&test_dir);
+    fs::create_dir_all(&test_dir).expect("Crear dir de test");
+
+    // Base migrada con la versión anterior: usuarios ya admite Asesor, pero pagos quedó apuntando a usuarios_legacy
+    {
+        let roto = rusqlite::Connection::open(test_dir.join("cooperar.db")).unwrap();
+        roto.execute_batch("
+            CREATE TABLE usuarios(id INTEGER PRIMARY KEY, nombre TEXT NOT NULL, dni TEXT UNIQUE, email TEXT UNIQUE,
+              rol TEXT NOT NULL CHECK(rol IN ('Presidente','Secretaria','Tesorero','Superadmin','Asesor')),
+              clave_hash TEXT NOT NULL, activo INTEGER NOT NULL DEFAULT 1);
+            CREATE TABLE usuarios_legacy(id INTEGER PRIMARY KEY, nombre TEXT NOT NULL, dni TEXT UNIQUE, email TEXT UNIQUE,
+              rol TEXT NOT NULL, clave_hash TEXT NOT NULL, activo INTEGER NOT NULL DEFAULT 1);
+            CREATE TABLE asociados(id INTEGER PRIMARY KEY, apellido_nombre TEXT NOT NULL, dni TEXT NOT NULL UNIQUE, telefono TEXT, email TEXT,
+              fecha_alta TEXT NOT NULL DEFAULT (date('now','localtime')), exento INTEGER NOT NULL DEFAULT 0, activo INTEGER NOT NULL DEFAULT 1);
+            CREATE TABLE pagos(id INTEGER PRIMARY KEY, asociado_id INTEGER NOT NULL REFERENCES asociados(id), periodo TEXT NOT NULL,
+              fecha_pago TEXT NOT NULL, monto INTEGER NOT NULL, medio TEXT NOT NULL, comprobante TEXT, anulado INTEGER NOT NULL DEFAULT 0,
+              registrado_por INTEGER NOT NULL REFERENCES usuarios_legacy(id), movimiento_id INTEGER);
+        ").unwrap();
+    }
+
+    let conn = db::init(&test_dir).expect("db::init debe reparar las referencias a usuarios_legacy");
+
+    let referencias: i64 = conn
+        .query_row("SELECT COUNT(*) FROM sqlite_master WHERE sql LIKE '%usuarios_legacy%'", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(referencias, 0, "Ninguna tabla debe seguir apuntando a usuarios_legacy");
+
+    let fk_activas: i64 = conn.query_row("PRAGMA foreign_keys", [], |r| r.get(0)).unwrap();
+    assert_eq!(fk_activas, 1, "La integridad referencial debe quedar activa");
+
+    let violaciones: i64 = conn.query_row("SELECT COUNT(*) FROM pragma_foreign_key_check", [], |r| r.get(0)).unwrap();
+    assert_eq!(violaciones, 0, "Los datos sembrados deben respetar todas las FKs");
 
     let _ = fs::remove_dir_all(&test_dir);
 }

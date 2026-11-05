@@ -84,6 +84,7 @@ fn main() {
             commands::guardar_acta,
             commands::listar_rendiciones,
             commands::detalle_rendicion,
+            commands::detalle_mensual_rendicion,
             commands::crear_rendicion,
             commands::aprobar_rendicion,
             commands::eliminar_rendicion,

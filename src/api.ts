@@ -104,6 +104,8 @@ export interface MovimientoCajaFila {
   motivoAnulacion?: string | null;
   adjuntoNombre?: string | null;
   registradoPor?: string | null;
+  /** Fecha y hora de carga en el sistema; `fecha` es la fecha real de la operación */
+  registradoEn?: string | null;
 }
 
 export interface DatosMovimientoCaja {
@@ -114,6 +116,8 @@ export interface DatosMovimientoCaja {
   comprobante?: string;
   adjuntoNombre?: string;
   adjuntoDatos?: string;
+  /** AAAA-MM-DD; si se omite, el núcleo usa la fecha del día */
+  fecha?: string;
 }
 
 export interface AdjuntoMovimiento {
@@ -165,6 +169,13 @@ export interface LineaRendicion {
   tipo: "Ingreso" | "Egreso";
   categoria: string;
   total: number;
+}
+
+export interface MesRendicion {
+  /** AAAA-MM */
+  mes: string;
+  ingresos: number;
+  egresos: number;
 }
 
 export interface DatosRendicion {
@@ -600,7 +611,8 @@ export const api = {
     const id = Date.now();
     mockMovimientos.unshift({
       id,
-      fecha: new Date().toISOString().split("T")[0],
+      fecha: datos.fecha || hoyISO(),
+      registradoEn: new Date().toLocaleString("es-AR"),
       tipo: datos.tipo,
       categoria: datos.categoria,
       descripcion: datos.descripcion,
@@ -695,6 +707,16 @@ export const api = {
       { tipo: "Egreso", categoria: "Material Didáctico y Librería", total: 19400 },
       { tipo: "Egreso", categoria: "Artículos de Limpieza", total: 12500 },
     ];
+  },
+  detalleMensualRendicion: async (id: number): Promise<MesRendicion[]> => {
+    if (isTauri) return invoke<MesRendicion[]>("detalle_mensual_rendicion", { id });
+    const r = mockRendiciones.find((x) => x.id === id);
+    if (!r) return [];
+    return mesesEntre(r.desde, r.hasta).map((mes) => {
+      const delMes = mockMovimientos.filter((m) => m.anulado === 0 && m.fecha.startsWith(mes));
+      const suma = (tipo: string) => delMes.filter((m) => m.tipo === tipo).reduce((acc, m) => acc + m.monto, 0);
+      return { mes, ingresos: suma("Ingreso"), egresos: suma("Egreso") };
+    });
   },
   eliminarRendicion: async (id: number): Promise<void> => {
     if (isTauri) return invoke<void>("eliminar_rendicion", { id });
@@ -975,4 +997,40 @@ export const api = {
 
 
 export const money = (n: number) => `$ ${n.toLocaleString("es-AR")}`;
+
+/** Fecha local de hoy en AAAA-MM-DD (toISOString usa UTC y después de las 21 h da el día siguiente) */
+export const hoyISO = () => {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+};
+
+/** Ejercicio de la cooperadora: del 1° de mayo al 30 de abril del año siguiente */
+export const ejercicioDe = (anioInicio: number) => ({
+  nombre: `Ejercicio ${anioInicio}/${anioInicio + 1}`,
+  desde: `${anioInicio}-05-01`,
+  hasta: `${anioInicio + 1}-04-30`,
+});
+
+/** Año en que empezó el ejercicio en curso (de enero a abril sigue abierto el del año anterior) */
+export const anioEjercicioActual = () => {
+  const d = new Date();
+  return d.getMonth() >= 4 ? d.getFullYear() : d.getFullYear() - 1;
+};
+
+/** Meses AAAA-MM entre dos fechas AAAA-MM-DD, ambos incluidos */
+export const mesesEntre = (desde: string, hasta: string) => {
+  const meses: string[] = [];
+  let anio = Number(desde.slice(0, 4));
+  let mes = Number(desde.slice(5, 7));
+  const fin = Number(hasta.slice(0, 4)) * 12 + Number(hasta.slice(5, 7));
+  while (anio * 12 + mes <= fin && meses.length < 120) {
+    meses.push(`${anio}-${String(mes).padStart(2, "0")}`);
+    if (mes === 12) { anio += 1; mes = 1; } else { mes += 1; }
+  }
+  return meses;
+};
+
+const NOMBRES_MES = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"];
+/** "2026-05" → "Mayo 2026" */
+export const nombreMes = (mes: string) => `${NOMBRES_MES[Number(mes.slice(5, 7)) - 1] ?? mes} ${mes.slice(0, 4)}`;
 export const signedMoney = (tipo: string, n: number) => `${tipo === "Ingreso" ? "+" : "-"} ${money(n)}`;

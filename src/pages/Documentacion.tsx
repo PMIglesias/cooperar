@@ -14,6 +14,8 @@ import {
   MiembroComisionFila,
   DatosInstitucionales,
   AsociadoFila,
+  ejercicioDe,
+  anioEjercicioActual,
 } from "../api";
 import {
   generarPdfNomina,
@@ -132,49 +134,71 @@ export default function Documentacion() {
     try {
       setGenerando(true);
       setError(null);
-      const anioActual = new Date().getFullYear();
-      const ejercicioActual = `${anioActual - 1}/${anioActual}`;
+      // La P.I.A. informa el último ejercicio cerrado (1° de mayo al 30 de abril)
+      const anioInicio = anioEjercicioActual() - 1;
+      const ejercicio = ejercicioDe(anioInicio);
+      const anioActual = anioInicio + 1;
+      const ejercicioActual = `${anioInicio}/${anioActual}`;
 
-      // Datos financieros levantados desde la base de datos
-      const resCaja = await api.resumenCaja().catch(() => ({
-        saldoActual: 185000,
-        ingresosMes: 289000,
-        egresosMes: 70400,
-        totalMovimientos: 5,
-      }));
+      // Datos financieros levantados desde la caja: totales del ejercicio por categoría
+      const [movimientos, padron] = await Promise.all([
+        api.listarMovimientosCaja("Todos", "Todas", ""),
+        api.resumenPadron(),
+      ]);
+      const validos = movimientos.filter((m) => m.anulado === 0);
+      const delEjercicio = validos.filter((m) => m.fecha >= ejercicio.desde && m.fecha <= ejercicio.hasta);
+      const saldoInicialCaja = validos
+        .filter((m) => m.fecha < ejercicio.desde)
+        .reduce((acc, m) => acc + (m.tipo === "Ingreso" ? m.monto : -m.monto), 0);
 
+      const totalPor = (tipo: "Ingreso" | "Egreso", categorias: string[]) =>
+        delEjercicio
+          .filter((m) => m.tipo === tipo && categorias.includes(m.categoria))
+          .reduce((acc, m) => acc + m.monto, 0);
+      const ING_MAPEADOS = ["Cuotas", "Donaciones", "Eventos y Festivales", "Subsidios"];
+      const EGR_MAPEADOS = ["Mantenimiento y Reparaciones", "Material Didáctico y Librería", "Artículos de Limpieza", "Equipamiento y Mobiliario", "Gastos Administrativos"];
+      // Las categorías sin renglón propio en la planilla van a "otros"
+      const otrosIngresos = delEjercicio
+        .filter((m) => m.tipo === "Ingreso" && !ING_MAPEADOS.includes(m.categoria))
+        .reduce((acc, m) => acc + m.monto, 0);
+      const otrosEgresos = delEjercicio
+        .filter((m) => m.tipo === "Egreso" && !EGR_MAPEADOS.includes(m.categoria))
+        .reduce((acc, m) => acc + m.monto, 0);
+
+      // Lo que la caja no distingue (rifas, kiosco, banco, gastos por alumno) queda en 0 para completar a mano
       const financiero: DatosFinancierosPia = {
-        saldoInicialCaja: 150000,
-        saldoInicialBanco: 230000,
-        totalCuotas: resCaja.ingresosMes > 0 ? resCaja.ingresosMes : 480000,
-        totalDonaciones: 35000,
-        totalRifas: 60000,
-        totalFestivales: 185000,
-        totalKiosco: 80000,
-        intereses: 6000,
-        reintegrados: 2000,
-        subsidios: 250000,
-        otrosIngresosA: 20000,
-        otrosIngresosB: 15000,
-        ropaCalzado: 45000,
-        librosUtiles: 80000,
-        excursiones: 55000,
-        emergencias: 15000,
-        golosinasPremios: 22000,
-        materialDidactico: 60000,
-        mantSubsidios: 150000,
-        mantFondosPropios: 85000,
-        limpieza: 42000,
-        combustible: 25000,
-        libreria: 20000,
-        mobiliario: 70000,
-        organizacionRifas: 15000,
-        organizacionFestivales: 35000,
-        gastosKiosco: 40000,
-        otrosGastosA: 10000,
-        otrosGastosB: 7000,
-        cuotaSocialAprobada: 8000,
-        cajaChicaAprobada: 40000,
+        saldoInicialCaja,
+        saldoInicialBanco: 0,
+        totalCuotas: totalPor("Ingreso", ["Cuotas"]),
+        totalDonaciones: totalPor("Ingreso", ["Donaciones"]),
+        totalRifas: 0,
+        totalFestivales: totalPor("Ingreso", ["Eventos y Festivales"]),
+        totalKiosco: 0,
+        intereses: 0,
+        reintegrados: 0,
+        subsidios: totalPor("Ingreso", ["Subsidios"]),
+        otrosIngresosA: otrosIngresos,
+        otrosIngresosB: 0,
+        ropaCalzado: 0,
+        librosUtiles: 0,
+        excursiones: 0,
+        emergencias: 0,
+        golosinasPremios: 0,
+        materialDidactico: totalPor("Egreso", ["Material Didáctico y Librería"]),
+        mantSubsidios: 0,
+        mantFondosPropios: totalPor("Egreso", ["Mantenimiento y Reparaciones"]),
+        limpieza: totalPor("Egreso", ["Artículos de Limpieza"]),
+        combustible: 0,
+        libreria: 0,
+        mobiliario: totalPor("Egreso", ["Equipamiento y Mobiliario"]),
+        organizacionRifas: 0,
+        organizacionFestivales: 0,
+        gastosKiosco: 0,
+        otrosGastosA: totalPor("Egreso", ["Gastos Administrativos"]),
+        otrosGastosB: otrosEgresos,
+        cuotaSocialAprobada: 0,
+        cajaChicaAprobada: 0,
+        sociosActivos: padron.activos,
       };
 
       const pdfBytes = await generarPdfPia(institucion, comision, financiero, ejercicioActual);

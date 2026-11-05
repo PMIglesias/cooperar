@@ -25,7 +25,10 @@ export default function Sidebar() {
     // Superadmin tiene acceso a todo
     if (usuario.rol === "Superadmin") return true;
 
-    // Usuarios y respaldo es exclusivo del Superadmin.
+    // Asesor: consulta todo en modo lectura, salvo el historial de cambios
+    if (usuario.rol === "Asesor") return it.route !== "historial";
+
+    // Usuarios y respaldo es exclusivo del Superadmin (y del Asesor, en lectura).
     if (it.route === "usuarios") return false;
 
     // Secretaria: gestión institucional (Asociados, Reuniones, Documentación, Comisión Directiva)
@@ -43,9 +46,6 @@ export default function Sidebar() {
     // Presidente: supervisión y gobierno institucional (Inicio, Asociados [lectura], Caja [lectura], Rendiciones [aprobación], Reuniones, Documentación, Comisión)
     if (usuario.rol === "Presidente") {
       return ["inicio", "asociados", "caja", "reuniones", "rendiciones", "documentacion", "comision"].includes(it.route);
-    }
-    if (usuario.rol === "Asesor") {
-      return it.route !== "historial";
     }
 
     return true;

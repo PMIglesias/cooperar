@@ -1,6 +1,6 @@
 // src/pages/Caja.tsx
 import { useEffect, useRef, useState, FormEvent } from "react";
-import { api, MovimientoCajaFila, ResumenCaja, money, signedMoney } from "../api";
+import { api, MovimientoCajaFila, ResumenCaja, money, signedMoney, hoyISO } from "../api";
 import Layout from "../components/Layout";
 import Button from "../components/ui/Button";
 import Card from "../components/ui/Card";
@@ -59,6 +59,7 @@ export default function Caja() {
   // Formulario Nuevo Movimiento
   const [tipo, setTipo] = useState<"Ingreso" | "Egreso">("Egreso");
   const [categoria, setCategoria] = useState(CATEGORIAS_EGRESO[0]);
+  const [fecha, setFecha] = useState(hoyISO());
   const [descripcion, setDescripcion] = useState("");
   const [monto, setMonto] = useState("");
   const [comprobante, setComprobante] = useState("");
@@ -99,6 +100,7 @@ export default function Caja() {
   const abrirNuevoMovimiento = () => {
     setTipo("Egreso");
     setCategoria(CATEGORIAS_EGRESO[0]);
+    setFecha(hoyISO());
     setDescripcion("");
     setMonto("");
     setComprobante("");
@@ -156,6 +158,7 @@ export default function Caja() {
         // El archivo se guarda en la base de datos para que quede incluido en las copias de seguridad
         adjuntoNombre: archivoBase64 ? archivoAdjunto || "comprobante" : undefined,
         adjuntoDatos: archivoBase64 || undefined,
+        fecha,
       });
 
       cargarDatos();
@@ -212,7 +215,7 @@ export default function Caja() {
     iframe.contentDocument?.write(`<!doctype html><html lang="es"><head><meta charset="utf-8"><title>Detalle del movimiento</title>
       <style>@page{size:A4 portrait;margin:10mm}*{box-sizing:border-box}body{font-family:Arial,sans-serif;color:#1f2937;margin:0}h1{font-size:20px;margin:0 0 14px}h3{font-size:14px;margin:14px 0 8px}.grid{display:grid;grid-template-columns:1fr 1fr;gap:10px 16px}.item span{display:block;color:#6b7280;font-size:12px;font-weight:600;margin-bottom:4px}.amount{font-size:18px;font-weight:700;color:${movimientoSeleccionado.tipo === "Ingreso" ? "#15803d" : "#b91c1c"}}.description{margin-top:16px;padding:10px;background:#f3f4f6;border:1px solid #d1d5db}.attachment{margin-top:14px;page-break-inside:avoid}.attachment img{display:block;max-width:100%;max-height:145mm;object-fit:contain}.pdf-note{padding:12px;border:1px solid #d1d5db}</style></head><body>
       <h1>Detalle del Movimiento #${movimientoSeleccionado.id}</h1>
-      <div class="grid"><div class="item"><span>Tipo de Movimiento</span><strong>${escapar(movimientoSeleccionado.tipo)}</strong></div><div class="item"><span>Estado</span><strong>${movimientoSeleccionado.anulado ? "Anulado" : "Efectivo / Válido"}</strong></div><div class="item"><span>Fecha del Movimiento</span><strong>${escapar(movimientoSeleccionado.fecha)}</strong></div><div class="item"><span>Registrado por</span><strong>${escapar(movimientoSeleccionado.registradoPor || "—")}</strong></div><div class="item"><span>Monto Operado</span><strong class="amount">${escapar(signedMoney(movimientoSeleccionado.tipo, movimientoSeleccionado.monto))}</strong></div><div class="item"><span>Categoría</span><strong>${escapar(movimientoSeleccionado.categoria)}</strong></div><div class="item"><span>N° de Comprobante / Factura</span><strong>${escapar(movimientoSeleccionado.comprobante || "Sin comprobante asociado")}</strong></div></div>
+      <div class="grid"><div class="item"><span>Tipo de Movimiento</span><strong>${escapar(movimientoSeleccionado.tipo)}</strong></div><div class="item"><span>Estado</span><strong>${movimientoSeleccionado.anulado ? "Anulado" : "Efectivo / Válido"}</strong></div><div class="item"><span>Fecha del Movimiento</span><strong>${escapar(movimientoSeleccionado.fecha)}</strong></div><div class="item"><span>Registrado por</span><strong>${escapar(movimientoSeleccionado.registradoPor || "—")}</strong></div><div class="item"><span>Cargado en el sistema</span><strong>${escapar(movimientoSeleccionado.registradoEn || movimientoSeleccionado.fecha)}</strong></div><div class="item"><span>Monto Operado</span><strong class="amount">${escapar(signedMoney(movimientoSeleccionado.tipo, movimientoSeleccionado.monto))}</strong></div><div class="item"><span>Categoría</span><strong>${escapar(movimientoSeleccionado.categoria)}</strong></div><div class="item"><span>N° de Comprobante / Factura</span><strong>${escapar(movimientoSeleccionado.comprobante || "Sin comprobante asociado")}</strong></div></div>
       <div class="description"><strong>Concepto / Descripción Detallada</strong><br>${escapar(movimientoSeleccionado.descripcion)}</div>${adjuntoHtml}</body></html>`);
     iframe.contentDocument?.close();
     setTimeout(() => {
@@ -454,6 +457,11 @@ export default function Caja() {
                   </div>
 
                   <div className={s.detailItem}>
+                    <span className={s.detailLabel}>Cargado en el sistema</span>
+                    <span className={s.detailValue}>{movimientoSeleccionado.registradoEn || movimientoSeleccionado.fecha}</span>
+                  </div>
+
+                  <div className={s.detailItem}>
                     <span className={s.detailLabel}>Monto Operado</span>
                     <span
                       className={s.detailValue}
@@ -663,13 +671,24 @@ export default function Caja() {
               </div>
             </label>
 
-            <SelectField
-              label="Categoría"
-              value={categoria}
-              options={tipo === "Ingreso" ? CATEGORIAS_INGRESO : CATEGORIAS_EGRESO}
-              onChange={setCategoria}
-              required
-            />
+            <div className={s.formRow}>
+              <SelectField
+                label="Categoría"
+                value={categoria}
+                options={tipo === "Ingreso" ? CATEGORIAS_INGRESO : CATEGORIAS_EGRESO}
+                onChange={setCategoria}
+                required
+              />
+              {/* Fecha real de la operación; la de carga en el sistema se registra sola */}
+              <Field
+                label={tipo === "Ingreso" ? "Fecha del ingreso" : "Fecha del gasto"}
+                type="date"
+                value={fecha}
+                max={hoyISO()}
+                onChange={(e) => setFecha(e.target.value)}
+                required
+              />
+            </div>
 
             <label className={`${s.field} ${s.fieldGrow}`}>
               <span className={s.label}>Descripción</span>

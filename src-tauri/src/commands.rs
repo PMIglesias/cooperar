@@ -540,7 +540,7 @@ pub fn registrar_pago_interno(db: &mut Connection, datos: &DatosPago, usuario_id
 
     // 1. Crear movimiento en caja automático
     tx.execute(
-        "INSERT INTO movimientos_caja(fecha, tipo, categoria, descripcion, monto, comprobante, adjunto_nombre, adjunto_datos, registrado_por) VALUES(date('now','localtime'), 'Ingreso', 'Cuotas', ?1, ?2, ?3, ?4, ?5, ?6)",
+        "INSERT INTO movimientos_caja(fecha, tipo, categoria, descripcion, monto, comprobante, adjunto_nombre, adjunto_datos, registrado_por, registrado_en) VALUES(date('now','localtime'), 'Ingreso', 'Cuotas', ?1, ?2, ?3, ?4, ?5, ?6, datetime('now','localtime'))",
         params![desc, datos.monto, datos.comprobante, datos.adjunto_nombre, datos.adjunto_datos, usuario_id],
     ).map_err(s)?;
     let mov_id = tx.last_insert_rowid();
@@ -559,6 +559,9 @@ pub fn registrar_pago_interno(db: &mut Connection, datos: &DatosPago, usuario_id
 #[tauri::command]
 pub fn registrar_pago(st: State<AppState>, datos: DatosPago) -> R<i64> {
     let u = auth_tesorero_o_admin(&st)?;
+    if datos.adjunto_datos.as_ref().map_or(false, |d| d.len() / 4 * 3 > LIMITE_ADJUNTO_BYTES) {
+        return Err("El comprobante adjunto supera el límite de 10 MB".to_string());
+    }
     let mut db = st.db.lock().map_err(s)?;
     let id = registrar_pago_interno(&mut db, &datos, u.id)?;
     auditar(&db, u.id, "CREAR", "pago", Some(id))?;
@@ -584,6 +587,8 @@ pub struct MovimientoCajaFila {
     pub adjunto_nombre: Option<String>,
     /// "Rol (Nombre)" de quien cargó el movimiento; None en movimientos previos a la migración
     pub registrado_por: Option<String>,
+    /// Fecha y hora en que se cargó en el sistema; `fecha` es la fecha real de la operación
+    pub registrado_en: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -601,7 +606,7 @@ pub fn listar_movimientos_caja(st: State<AppState>, tipo: String, categoria: Str
     let db = st.db.lock().map_err(s)?;
     let mut q = db.prepare(
         "SELECT m.id, m.fecha, m.tipo, m.categoria, m.descripcion, m.monto, m.comprobante, m.anulado, m.motivo_anulacion,
-                m.adjunto_nombre, u.rol || ' (' || u.nombre || ')'
+                m.adjunto_nombre, u.rol || ' (' || u.nombre || ')', m.registrado_en
          FROM movimientos_caja m
          LEFT JOIN usuarios u ON u.id = m.registrado_por
          WHERE (?1 = 'Todos' OR m.tipo = ?1)
@@ -614,6 +619,7 @@ pub fn listar_movimientos_caja(st: State<AppState>, tipo: String, categoria: Str
             id: r.get(0)?, fecha: r.get(1)?, tipo: r.get(2)?, categoria: r.get(3)?,
             descripcion: r.get(4)?, monto: r.get(5)?, comprobante: r.get(6)?, anulado: r.get(7)?,
             motivo_anulacion: r.get(8)?, adjunto_nombre: r.get(9)?, registrado_por: r.get(10)?,
+            registrado_en: r.get(11)?,
         })
     }).map_err(s)?;
     let v = rows.collect::<Result<Vec<_>, _>>().map_err(s)?;
@@ -642,6 +648,8 @@ pub struct DatosMovimientoCaja {
     /// Archivo escaneado (PDF o imagen) como data URL; se guarda en la base para que viaje con los respaldos
     pub adjunto_nombre: Option<String>,
     pub adjunto_datos: Option<String>,
+    /// Fecha real de la operación (AAAA-MM-DD); si no viene se toma la del día
+    pub fecha: Option<String>,
 }
 
 /// RNF08: límite de 10 MB por archivo adjunto
@@ -658,11 +666,27 @@ pub fn crear_movimiento_caja(st: State<AppState>, datos: DatosMovimientoCaja) ->
         return Err("El comprobante adjunto supera el límite de 10 MB".to_string());
     }
     let db = st.db.lock().map_err(s)?;
+    crear_movimiento_caja_interno(&db, &datos, u.id)
+}
+
+pub fn crear_movimiento_caja_interno(db: &Connection, datos: &DatosMovimientoCaja, usuario_id: i64) -> R<i64> {
+    let fecha = datos.fecha.as_deref().map(str::trim).filter(|f| !f.is_empty());
+    if let Some(f) = fecha {
+        let (valida, futura): (bool, bool) = db
+            .query_row("SELECT date(?1) IS ?1, ?1 > date('now','localtime')", params![f], |r| Ok((r.get(0)?, r.get(1)?)))
+            .map_err(s)?;
+        if !valida {
+            return Err("La fecha del movimiento no es válida".to_string());
+        }
+        if futura {
+            return Err("La fecha del movimiento no puede ser posterior a hoy".to_string());
+        }
+    }
     db.execute(
-        "INSERT INTO movimientos_caja(fecha, tipo, categoria, descripcion, monto, comprobante, adjunto_nombre, adjunto_datos, registrado_por)
-         VALUES(date('now','localtime'), ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+        "INSERT INTO movimientos_caja(fecha, tipo, categoria, descripcion, monto, comprobante, adjunto_nombre, adjunto_datos, registrado_por, registrado_en)
+         VALUES(COALESCE(?9, date('now','localtime')), ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, datetime('now','localtime'))",
         params![datos.tipo, datos.categoria.trim(), datos.descripcion.trim(), datos.monto, datos.comprobante,
-                datos.adjunto_nombre, datos.adjunto_datos, u.id],
+                datos.adjunto_nombre, datos.adjunto_datos, usuario_id, fecha],
     ).map_err(s)?;
     Ok(db.last_insert_rowid())
 }
@@ -865,6 +889,66 @@ pub fn detalle_rendicion(st: State<AppState>, id: i64) -> R<Vec<LineaRendicion>>
     auth(&st)?;
     let db = st.db.lock().map_err(s)?;
     detalle_rendicion_interno(&db, id)
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MesRendicion {
+    /// AAAA-MM
+    pub mes: String,
+    pub ingresos: i64,
+    pub egresos: i64,
+}
+
+/// Totales de cada mes del período de la rendición; los meses sin movimientos van en 0
+pub fn detalle_mensual_rendicion_interno(db: &Connection, id: i64) -> R<Vec<MesRendicion>> {
+    let (desde, hasta): (String, String) = db.query_row(
+        "SELECT desde, hasta FROM rendiciones WHERE id=?1",
+        params![id],
+        |r| Ok((r.get(0)?, r.get(1)?)),
+    ).map_err(|_| "La rendición de cuentas no existe".to_string())?;
+
+    let anio_mes = |fecha: &str| -> R<(i32, u32)> {
+        let anio = fecha.get(0..4).and_then(|a| a.parse().ok());
+        let mes = fecha.get(5..7).and_then(|m| m.parse().ok());
+        match (anio, mes) {
+            (Some(a), Some(m)) if (1..=12).contains(&m) => Ok((a, m)),
+            _ => Err(format!("Fecha de rendición inválida: {}", fecha)),
+        }
+    };
+    let (mut anio, mut mes) = anio_mes(&desde)?;
+    let fin = anio_mes(&hasta)?;
+
+    let mut q = db.prepare(
+        "SELECT strftime('%Y-%m', fecha),
+                SUM(CASE WHEN tipo='Ingreso' THEN monto ELSE 0 END),
+                SUM(CASE WHEN tipo='Egreso' THEN monto ELSE 0 END)
+         FROM movimientos_caja
+         WHERE anulado=0 AND fecha BETWEEN ?1 AND ?2
+         GROUP BY 1",
+    ).map_err(s)?;
+    let totales = q
+        .query_map(params![desde, hasta], |r| Ok((r.get::<_, String>(0)?, (r.get::<_, i64>(1)?, r.get::<_, i64>(2)?))))
+        .map_err(s)?
+        .collect::<Result<std::collections::HashMap<_, _>, _>>()
+        .map_err(s)?;
+
+    let mut meses = Vec::new();
+    // Tope de 10 años para no iterar sin fin ante un rango mal cargado
+    while (anio, mes) <= fin && meses.len() < 120 {
+        let clave = format!("{:04}-{:02}", anio, mes);
+        let (ingresos, egresos) = totales.get(&clave).copied().unwrap_or((0, 0));
+        meses.push(MesRendicion { mes: clave, ingresos, egresos });
+        if mes == 12 { anio += 1; mes = 1; } else { mes += 1; }
+    }
+    Ok(meses)
+}
+
+#[tauri::command]
+pub fn detalle_mensual_rendicion(st: State<AppState>, id: i64) -> R<Vec<MesRendicion>> {
+    auth(&st)?;
+    let db = st.db.lock().map_err(s)?;
+    detalle_mensual_rendicion_interno(&db, id)
 }
 
 #[derive(Deserialize)]
@@ -1306,10 +1390,43 @@ pub fn listar_comision_directiva(st: State<AppState>) -> R<Vec<MiembroComisionFi
     Ok(res)
 }
 
+/// Cargos de la comisión propiamente dicha (presidencia, secretaría, tesorería y vocales),
+/// a diferencia de los revisores de cuentas y del asesor
+pub fn es_cargo_de_comision(cargo: &str) -> bool {
+    let c = cargo.to_uppercase();
+    !c.starts_with("REV") && !c.contains("ASESOR")
+}
+
+/// El personal del establecimiento sólo puede figurar como asesor o revisor de cuentas docente;
+/// los cargos de la comisión corresponden a los asociados
+pub fn validar_vinculo_comision(db: &Connection, miembro: &MiembroComisionFila) -> R<()> {
+    if !es_cargo_de_comision(&miembro.cargo) {
+        return Ok(());
+    }
+    let error = format!(
+        "El personal directivo de la escuela no puede ocupar el cargo {}: sólo puede figurar como asesor o revisor de cuentas docente",
+        miembro.cargo
+    );
+    if miembro.personal_establecimiento_id.is_some() {
+        return Err(error);
+    }
+    if let Some(asociado_id) = miembro.asociado_id {
+        let tipo: Option<String> = db
+            .query_row("SELECT tipo_vinculo FROM asociados WHERE id=?1", params![asociado_id], |r| r.get(0))
+            .optional()
+            .map_err(s)?;
+        if tipo.as_deref() == Some("DIRECTIVO_ESCOLAR") {
+            return Err(error);
+        }
+    }
+    Ok(())
+}
+
 #[tauri::command]
 pub fn guardar_miembro_comision(st: State<AppState>, miembro: MiembroComisionFila) -> R<()> {
     let u = auth_secretaria_o_admin(&st)?;
     let db = st.db.lock().map_err(s)?;
+    validar_vinculo_comision(&db, &miembro)?;
     if miembro.id == 0 {
         db.execute(
             "INSERT INTO comision_directiva(orden, cargo, asociado_id, personal_establecimiento_id, nombre, dni, cuil, domicilio, localidad, telefono, email, vencimiento)
@@ -1377,6 +1494,20 @@ pub fn listar_personal_establecimiento(st: State<AppState>) -> R<Vec<PersonalEst
 pub fn guardar_personal_establecimiento(st: State<AppState>, p: PersonalEstablecimientoFila) -> R<PersonalEstablecimientoFila> {
     let u = auth_secretaria_o_admin(&st)?;
     let db = st.db.lock().map_err(s)?;
+    if let Some(id_text) = p.vinculo_nomina.strip_prefix("AUTORIDAD:") {
+        let autoridad_id: i64 = id_text.parse().map_err(|_| "Vínculo de autoridad inválido".to_string())?;
+        let cargo: Option<String> = db
+            .query_row("SELECT cargo FROM comision_directiva WHERE id=?1", params![autoridad_id], |r| r.get(0))
+            .optional()
+            .map_err(s)?;
+        let cargo = cargo.ok_or_else(|| "La autoridad seleccionada no existe".to_string())?;
+        if es_cargo_de_comision(&cargo) {
+            return Err(format!(
+                "El personal de la escuela no puede ocupar el cargo {}: sólo puede figurar como asesor o revisor de cuentas docente",
+                cargo
+            ));
+        }
+    }
     let id = if p.id == 0 {
         db.execute(
             "INSERT INTO personal_establecimiento(cargo, nombre, dni, telefono, email, vinculo_nomina)

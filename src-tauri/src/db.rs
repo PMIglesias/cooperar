@@ -22,7 +22,7 @@ CREATE TABLE IF NOT EXISTS movimientos_caja(
   id INTEGER PRIMARY KEY, fecha TEXT NOT NULL, tipo TEXT NOT NULL CHECK(tipo IN ('Ingreso','Egreso')),
   categoria TEXT NOT NULL, descripcion TEXT NOT NULL, monto INTEGER NOT NULL,
   comprobante TEXT, anulado INTEGER NOT NULL DEFAULT 0, motivo_anulacion TEXT,
-  adjunto_nombre TEXT, adjunto_datos TEXT, registrado_por INTEGER REFERENCES usuarios(id));
+  adjunto_nombre TEXT, adjunto_datos TEXT, registrado_por INTEGER REFERENCES usuarios(id), registrado_en TEXT);
 CREATE TABLE IF NOT EXISTS pagos(
   id INTEGER PRIMARY KEY, asociado_id INTEGER NOT NULL REFERENCES asociados(id),
   periodo TEXT NOT NULL, fecha_pago TEXT NOT NULL, monto INTEGER NOT NULL, medio TEXT NOT NULL,
@@ -127,6 +127,7 @@ pub fn init(dir: &Path) -> Result<Connection, Box<dyn std::error::Error>> {
     let _ = conn.execute("ALTER TABLE movimientos_caja ADD COLUMN adjunto_nombre TEXT", []);
     let _ = conn.execute("ALTER TABLE movimientos_caja ADD COLUMN adjunto_datos TEXT", []);
     let _ = conn.execute("ALTER TABLE movimientos_caja ADD COLUMN registrado_por INTEGER REFERENCES usuarios(id)", []);
+    let _ = conn.execute("ALTER TABLE movimientos_caja ADD COLUMN registrado_en TEXT", []);
     let _ = conn.execute("ALTER TABLE reuniones ADD COLUMN registrado_por INTEGER REFERENCES usuarios(id)", []);
     let _ = conn.execute("ALTER TABLE comision_directiva ADD COLUMN asociado_id INTEGER REFERENCES asociados(id) ON DELETE SET NULL", []);
     let _ = conn.execute("ALTER TABLE comision_directiva ADD COLUMN personal_establecimiento_id INTEGER REFERENCES personal_establecimiento(id) ON DELETE SET NULL", []);
@@ -145,42 +146,44 @@ pub fn init(dir: &Path) -> Result<Connection, Box<dyn std::error::Error>> {
         .optional()?;
     if let Some(sql) = usuarios_sql {
         if !sql.contains("'Asesor'") {
+            // Se crea la tabla nueva y se renombra al final: renombrar la vieja haría que SQLite
+            // reescriba las FKs de las demás tablas hacia el nombre temporal y queden rotas al borrarla.
             conn.execute_batch(
                 "PRAGMA foreign_keys = OFF;
-                 ALTER TABLE usuarios RENAME TO usuarios_legacy;
-                 CREATE TABLE usuarios(
+                 CREATE TABLE usuarios_nueva(
                    id INTEGER PRIMARY KEY, nombre TEXT NOT NULL, dni TEXT UNIQUE, email TEXT UNIQUE,
                    rol TEXT NOT NULL CHECK(rol IN ('Presidente','Secretaria','Tesorero','Superadmin','Asesor')),
                    clave_hash TEXT NOT NULL, activo INTEGER NOT NULL DEFAULT 1
                  );
-                 INSERT INTO usuarios(id, nombre, dni, email, rol, clave_hash, activo)
-                   SELECT id, nombre, dni, email, rol, clave_hash, activo FROM usuarios_legacy;
-                 DROP TABLE usuarios_legacy;
+                 INSERT INTO usuarios_nueva(id, nombre, dni, email, rol, clave_hash, activo)
+                   SELECT id, nombre, dni, email, rol, clave_hash, activo FROM usuarios;
+                 DROP TABLE usuarios;
+                 ALTER TABLE usuarios_nueva RENAME TO usuarios;
                  PRAGMA foreign_keys = ON;",
             )?;
         }
     }
 
-    // Algunas bases existentes conservaron FKs internas hacia usuarios_legacy
-    // al migrar la restricción del rol. Mantener la tabla espejo evita que
-    // operaciones sobre esas tablas fallen mientras se conservan sus IDs.
+    // Reparación de bases migradas con la versión anterior: sus FKs quedaron apuntando a
+    // usuarios_legacy. Renombrar usuarios ida y vuelta hace que SQLite reescriba todas las
+    // referencias hacia "usuarios" y se puede volver a trabajar con las FKs activas.
     let referencias_legacy: i64 = conn.query_row(
-        "SELECT COUNT(*) FROM sqlite_master WHERE sql LIKE '%usuarios_legacy%'",
+        "SELECT COUNT(*) FROM sqlite_master WHERE name <> 'usuarios_legacy' AND sql LIKE '%usuarios_legacy%'",
         [],
         |r| r.get(0),
     )?;
     if referencias_legacy > 0 {
         conn.execute_batch(
-            "CREATE TABLE IF NOT EXISTS usuarios_legacy(
-               id INTEGER PRIMARY KEY, nombre TEXT NOT NULL, dni TEXT UNIQUE, email TEXT UNIQUE,
-               rol TEXT NOT NULL, clave_hash TEXT NOT NULL, activo INTEGER NOT NULL DEFAULT 1
-             );
-             INSERT OR IGNORE INTO usuarios_legacy(id, nombre, dni, email, rol, clave_hash, activo)
-               SELECT id, nombre, dni, email, rol, clave_hash, activo FROM usuarios;",
+            "PRAGMA foreign_keys = OFF;
+             PRAGMA legacy_alter_table = OFF;
+             DROP VIEW IF EXISTS v_asociados;
+             DROP TABLE IF EXISTS usuarios_legacy;
+             ALTER TABLE usuarios RENAME TO usuarios_legacy;
+             ALTER TABLE usuarios_legacy RENAME TO usuarios;
+             PRAGMA foreign_keys = ON;",
         )?;
     }
 
-    let _ = conn.execute("PRAGMA foreign_keys = OFF", []);
     conn.execute_batch(SCHEMA)?;
     let _ = conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_pagos_asociado_periodo_activo ON pagos(asociado_id, periodo) WHERE anulado=0", []);
 
@@ -280,6 +283,9 @@ pub fn init(dir: &Path) -> Result<Connection, Box<dyn std::error::Error>> {
         conn.execute("UPDATE movimientos_caja SET registrado_por=(SELECT id FROM usuarios WHERE rol='Tesorero') WHERE registrado_por IS NULL", [])?;
         conn.execute("UPDATE reuniones SET registrado_por=(SELECT id FROM usuarios WHERE rol='Secretaria') WHERE registrado_por IS NULL", [])?;
     }
+
+    // Movimientos anteriores a la fecha de registro separada: se toma la fecha del movimiento
+    conn.execute("UPDATE movimientos_caja SET registrado_en = fecha WHERE registrado_en IS NULL", [])?;
 
     // 7. Dummy data para Comisión Directiva si está vacía
     let n_comision: i64 = conn.query_row("SELECT COUNT(*) FROM comision_directiva", [], |r| r.get(0)).unwrap_or(0);

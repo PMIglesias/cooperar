@@ -742,7 +742,7 @@ export default function Cuotas() {
       }
     >
       {reciboSeleccionado ? (
-        <div className={s.receiptPaper}>
+        <div className={`${s.receiptPaper} ${s.printSection}`}>
           <div className={s.receiptHeader}>
             <div>
               <div className={s.receiptSchool}>Asociación Cooperadora Escolar</div>

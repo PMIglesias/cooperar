@@ -1,6 +1,6 @@
 // src/pages/Rendiciones.tsx
 import { useEffect, useState, FormEvent } from "react";
-import { api, RendicionFila, LineaRendicion, money } from "../api";
+import { api, RendicionFila, LineaRendicion, MesRendicion, money, hoyISO, ejercicioDe, anioEjercicioActual, nombreMes } from "../api";
 import Layout from "../components/Layout";
 import Button from "../components/ui/Button";
 import Card from "../components/ui/Card";
@@ -25,15 +25,18 @@ export default function Rendiciones() {
   const [loading, setLoading] = useState(false);
 
   // Formulario Nueva Rendición
-  const [periodo, setPeriodo] = useState("3° Trimestre 2026");
-  const [desde, setDesde] = useState("2026-07-01");
-  const [hasta, setHasta] = useState("2026-09-30");
+  const [modo, setModo] = useState<"anual" | "personalizado">("anual");
+  const [anioEjercicio, setAnioEjercicio] = useState(anioEjercicioActual());
+  const [periodo, setPeriodo] = useState(ejercicioDe(anioEjercicioActual()).nombre);
+  const [desde, setDesde] = useState(ejercicioDe(anioEjercicioActual()).desde);
+  const [hasta, setHasta] = useState(ejercicioDe(anioEjercicioActual()).hasta);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   // Pantalla Detalle / Planilla
   const [rendicionSeleccionada, setRendicionSeleccionada] = useState<RendicionFila | null>(null);
   const [detalle, setDetalle] = useState<LineaRendicion[]>([]);
+  const [meses, setMeses] = useState<MesRendicion[]>([]);
   const [aprobando, setAprobando] = useState(false);
   const [rendicionParaEliminar, setRendicionParaEliminar] = useState<{ id: number; periodo: string } | null>(null);
 
@@ -53,22 +56,48 @@ export default function Rendiciones() {
   const idSeleccionada = rendicionSeleccionada?.id;
   useEffect(() => {
     setDetalle([]);
+    setMeses([]);
     if (idSeleccionada === undefined) return;
     api.detalleRendicion(idSeleccionada).then(setDetalle).catch(console.error);
+    api.detalleMensualRendicion(idSeleccionada).then(setMeses).catch(console.error);
   }, [idSeleccionada]);
 
   const lineasIngreso = detalle.filter((l) => l.tipo === "Ingreso");
   const lineasEgreso = detalle.filter((l) => l.tipo === "Egreso");
 
+  // Detalle mes a mes con el saldo acumulado del período
+  let acumulado = 0;
+  const filasMensuales = meses.map((m) => {
+    acumulado += m.ingresos - m.egresos;
+    return { ...m, saldoMes: m.ingresos - m.egresos, acumulado };
+  });
+
+  // La rendición anual va por ejercicio, del 1° de mayo al 30 de abril
+  const ejerciciosDisponibles = Array.from({ length: 4 }, (_, i) => anioEjercicioActual() - i);
+
+  const elegirEjercicio = (anioInicio: number) => {
+    const ej = ejercicioDe(anioInicio);
+    setAnioEjercicio(anioInicio);
+    setPeriodo(ej.nombre);
+    setDesde(ej.desde);
+    setHasta(ej.hasta);
+  };
+
+  const cambiarModo = (valor: string) => {
+    const nuevo = valor === "personalizado" ? "personalizado" : "anual";
+    setModo(nuevo);
+    if (nuevo === "anual") {
+      elegirEjercicio(anioEjercicio);
+    } else {
+      setPeriodo("");
+      setDesde(`${hoyISO().slice(0, 8)}01`);
+      setHasta(hoyISO());
+    }
+  };
+
   const abrirNuevaRendicion = () => {
-    const hoy = new Date();
-    const year = hoy.getFullYear();
-    const yearPrev = year - 1;
-    const yearShort = year.toString().slice(-2);
-    const todayStr = hoy.toISOString().split("T")[0];
-    setPeriodo(`Rendición Anual Periodo ${yearPrev}-${yearShort}`);
-    setDesde(`${year}-01-01`);
-    setHasta(todayStr);
+    setModo("anual");
+    elegirEjercicio(anioEjercicioActual());
     setError(null);
     setVista("nuevo");
   };
@@ -81,6 +110,10 @@ export default function Rendiciones() {
     }
     if (!desde || !hasta) {
       setError("Debe completar el rango de fechas desde y hasta.");
+      return;
+    }
+    if (desde > hasta) {
+      setError("La fecha desde no puede ser posterior a la fecha hasta.");
       return;
     }
 
@@ -167,6 +200,9 @@ export default function Rendiciones() {
         .muted { color: #6b7280; } .balance { margin-top: 20px; padding: 12px; background: #f3f4f6; display: flex; justify-content: space-between; font-weight: 700; }
         .signatures { display: grid; grid-template-columns: repeat(3, 1fr); gap: 24px; margin-top: 60px; text-align: center; font-size: 11px; }
         .signatures span { display: block; border-top: 1px solid #9ca3af; padding-top: 7px; }
+        .monthly { margin-top: 22px; page-break-inside: avoid; } .monthly h2 { color: #1f2937; border-color: #1f2937; }
+        .monthly th { font-size: 11px; text-align: right; padding: 5px 0; border-bottom: 1px solid #9ca3af; } .monthly th:first-child { text-align: left; }
+        .monthly td { text-align: right; font-weight: 400; } .monthly td:first-child { text-align: left; } .monthly .total td { font-weight: 700; }
       </style></head><body>
       <h1>Planilla de Rendición de Cuentas</h1>
       <div class="subtitle">Asociación Cooperadora Escolar — ${escapar(rendicionSeleccionada.periodo)}</div>
@@ -176,6 +212,11 @@ export default function Rendiciones() {
         <section><h2 class="expense">II. EGRESOS</h2><table>${filas(lineasEgreso, "Sin egresos en el período")}<tr class="total expense"><td>TOTAL EGRESOS</td><td>- ${escapar(money(rendicionSeleccionada.totalEgresos))}</td></tr></table></section>
       </div>
       <div class="balance"><span>SALDO FINAL DEL PERÍODO</span><span>${escapar(money(rendicionSeleccionada.saldoPeriodo))}</span></div>
+      ${filasMensuales.length > 1 ? `<section class="monthly"><h2>III. DETALLE MENSUAL</h2><table>
+        <tr><th>Mes</th><th>Ingresos</th><th>Egresos</th><th>Saldo del mes</th><th>Saldo acumulado</th></tr>
+        ${filasMensuales.map((m) => `<tr><td>${escapar(nombreMes(m.mes))}</td><td>${escapar(money(m.ingresos))}</td><td>${escapar(money(m.egresos))}</td><td>${escapar(money(m.saldoMes))}</td><td>${escapar(money(m.acumulado))}</td></tr>`).join("")}
+        <tr class="total"><td>TOTAL</td><td>${escapar(money(rendicionSeleccionada.totalIngresos))}</td><td>${escapar(money(rendicionSeleccionada.totalEgresos))}</td><td></td><td>${escapar(money(rendicionSeleccionada.saldoPeriodo))}</td></tr>
+      </table></section>` : ""}
       <div class="signatures"><span>Tesorero/a</span><span>Presidente</span><span>Revisor de Cuentas</span></div>
       </body></html>`);
     iframe.contentDocument?.close();
@@ -200,7 +241,14 @@ export default function Rendiciones() {
       header: "Período",
       minWidth: 140,
       flex: true,
-      render: (r) => <strong>{r.periodo}</strong>,
+      render: (r) => (
+        <div>
+          <strong>{r.periodo}</strong>
+          <div style={{ fontSize: "var(--fs-xs)", color: "var(--color-text-muted)" }}>
+            {r.desde} al {r.hasta}
+          </div>
+        </div>
+      ),
     },
     { header: "Generada el", width: 100, render: (r) => r.generadaEn },
     {
@@ -368,6 +416,31 @@ export default function Rendiciones() {
 
           <Card title="Parámetros del balance">
             <div className={s.formFields}>
+              <div className={s.formRow}>
+                <SelectField
+                  label="Tipo de rendición"
+                  value={modo}
+                  options={[
+                    { value: "anual", label: "Ejercicio anual (mayo a abril)" },
+                    { value: "personalizado", label: "Período personalizado" },
+                  ]}
+                  onChange={cambiarModo}
+                  width={300}
+                />
+                {modo === "anual" && (
+                  <SelectField
+                    label="Ejercicio"
+                    value={String(anioEjercicio)}
+                    options={ejerciciosDisponibles.map((anio) => ({
+                      value: String(anio),
+                      label: `${anio}/${anio + 1}${anio === anioEjercicioActual() ? " (en curso)" : ""}`,
+                    }))}
+                    onChange={(v) => elegirEjercicio(Number(v))}
+                    width={220}
+                  />
+                )}
+              </div>
+
               <Field
                 label="Nombre del período / Ejercicio"
                 placeholder="Ej: 3° Trimestre 2026 (Jul-Sep)"
@@ -383,6 +456,7 @@ export default function Rendiciones() {
                   type="date"
                   value={desde}
                   onChange={(e) => setDesde(e.target.value)}
+                  disabled={modo === "anual"}
                   width={220}
                   required
                 />
@@ -391,10 +465,16 @@ export default function Rendiciones() {
                   type="date"
                   value={hasta}
                   onChange={(e) => setHasta(e.target.value)}
+                  disabled={modo === "anual"}
                   width={220}
                   required
                 />
               </div>
+              {modo === "anual" && (
+                <p style={{ margin: 0, fontSize: "var(--fs-sm)", color: "var(--color-text-muted)" }}>
+                  La planilla suma los movimientos del ejercicio y los detalla mes por mes; los meses sin movimientos figuran en 0.
+                </p>
+              )}
             </div>
           </Card>
 
@@ -502,6 +582,34 @@ export default function Rendiciones() {
               {money(rendicionSeleccionada.saldoPeriodo)}
             </span>
           </div>
+
+          {filasMensuales.length > 1 && (
+            <div style={{ marginTop: "var(--space-6)" }}>
+              <div className={s.sheetColTitle}>III. DETALLE MENSUAL</div>
+              <table className={s.sheetTable}>
+                <thead>
+                  <tr style={{ fontSize: "var(--fs-sm)", color: "var(--color-text-muted)" }}>
+                    <th style={{ textAlign: "left" }}>Mes</th>
+                    <th style={{ textAlign: "right" }}>Ingresos</th>
+                    <th style={{ textAlign: "right" }}>Egresos</th>
+                    <th style={{ textAlign: "right" }}>Saldo del mes</th>
+                    <th style={{ textAlign: "right" }}>Saldo acumulado</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filasMensuales.map((m) => (
+                    <tr key={m.mes} style={m.ingresos === 0 && m.egresos === 0 ? { color: "var(--color-text-hint)" } : undefined}>
+                      <td>{nombreMes(m.mes)}</td>
+                      <td style={{ textAlign: "right" }}>{money(m.ingresos)}</td>
+                      <td style={{ textAlign: "right" }}>{money(m.egresos)}</td>
+                      <td style={{ textAlign: "right" }}>{money(m.saldoMes)}</td>
+                      <td style={{ textAlign: "right", fontWeight: 600 }}>{money(m.acumulado)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
 
           <div className={s.sheetSignatures}>
             <div className={s.signBox}>Tesorero/a</div>

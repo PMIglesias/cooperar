@@ -123,6 +123,8 @@ export interface DatosFinancierosPia {
   otrosGastosB: number;
   cuotaSocialAprobada: number;
   cajaChicaAprobada: number;
+  /** Asociados activos del padrón */
+  sociosActivos?: number;
 }
 
 export async function generarPdfPia(
@@ -189,30 +191,13 @@ export async function generarPdfPia(
   trySet("TELÉFONO", institucion.telefonoEscuela);
   trySet("TELÉFONO2", institucion.telefonoEscuela);
 
-  // Cuadro 2: Socios
-  trySet("activos", "148");
-  trySet("honorarios", "4");
-  trySet("adherentes", "12");
+  // Cuadro 2: Socios (honorarios y adherentes no se registran en el sistema: se completan en el PDF)
+  if (financiero.sociosActivos !== undefined) trySet("activos", financiero.sociosActivos);
 
-  // Cuadro 3: Asamblea Anual Ordinaria
-  const anioFull = anios[1] ? anios[1].trim() : (2000 + parseInt(anioFin)).toString();
-  const anioAA = anioFull.slice(-2);
-  trySet("acta", "49");
-  trySet("foja", "12");
-  trySet("dia", "15");
-  trySet("mes", "05");
-  trySet("año", anioAA);
-  trySet("asistieron", "38");
-
-  // Cuadro 4: Decisiones Adoptadas
-  trySet("1DECISIÓN ADOPTADA", "Aprobado por unanimidad");
-  trySet("2DECISIÓN ADOPTADA", "Aprobada por unanimidad sin objeciones");
-  trySet("3DECISIÓN ADOPTADA", "Aprobado dictamen favorable");
-  trySet("4DECISIÓN ADOPTADA", "Aprobados Memoria y Balance general");
-  trySet("5DECISIÓN ADOPTADA", "Electa Lista 1 Renovación por mayoría");
-  trySet("6", financiero.cuotaSocialAprobada);
-  tryCheck("Check Box34"); // Mensual
-  trySet("7", financiero.cajaChicaAprobada);
+  // Cuadros 3 y 4 (acta, foja, fecha y asistencia de la asamblea, decisiones adoptadas) salen
+  // del libro de actas: quedan en blanco para completarlos en el PDF, que conserva sus campos editables
+  if (financiero.cuotaSocialAprobada > 0) trySet("6", financiero.cuotaSocialAprobada);
+  if (financiero.cajaChicaAprobada > 0) trySet("7", financiero.cajaChicaAprobada);
 
   // Cuadro 5: Nueva Comisión Directiva (14 filas)
   // En la plantilla:
@@ -221,7 +206,13 @@ export async function generarPdfPia(
   //   Cuerpo CUIL (8 dígitos):  CUIL{idx + 14}
   //   Dígito CUIL (1 dígito):   CUIL{idx + 28}
   //   Columna VEN./MAN.:        Texto{idx + 3}
-  const sorted = [...miembros].sort((a, b) => a.orden - b.orden);
+  // Sólo los cargos de la comisión: los revisores de cuentas y el asesor van en el cuadro 6
+  const sorted = [...miembros]
+    .filter((m) => {
+      const cargo = m.cargo.toUpperCase();
+      return !cargo.startsWith("REV") && !cargo.includes("ASESOR");
+    })
+    .sort((a, b) => a.orden - b.orden);
   for (let i = 0; i < 14; i++) {
     const idx = i + 1;
     const m = sorted[i];
@@ -243,10 +234,11 @@ export async function generarPdfPia(
   }
 
   // Cuadro 6: Revisores de Cuentas y Asesor
-  const revTitDoc = miembros.find((m) => m.cargo.includes("DOCENTE")) || miembros[12];
-  const revTit1 = miembros.find((m) => m.cargo.includes("REV. CTAS. TITULAR 1")) || miembros[10];
-  const revSup1 = miembros.find((m) => m.cargo.includes("REV. CTAS. SUPLENTE 1")) || miembros[13];
-  const asesor = miembros.find((m) => m.cargo.includes("ASESOR")) || miembros[15];
+  // Se buscan por cargo: tomar una posición fija ponía a otra persona si la nómina cambiaba
+  const revTitDoc = miembros.find((m) => m.cargo.includes("TITULAR DOC"));
+  const revTit1 = miembros.find((m) => m.cargo.includes("REV. CTAS. TITULAR 1"));
+  const revSup1 = miembros.find((m) => m.cargo.includes("REV. CTAS. SUPLENTE 1"));
+  const asesor = miembros.find((m) => m.cargo.includes("ASESOR"));
 
   if (revTitDoc) {
     trySet("TITULAR DOCENTE", revTitDoc.nombre);
@@ -266,8 +258,8 @@ export async function generarPdfPia(
   }
 
   // Delegados ante la Federación (Cuadro superior y firma)
-  const pres = miembros[0];
-  const vice = miembros[1];
+  const pres = miembros.find((m) => m.cargo.toUpperCase() === "PRESIDENTE");
+  const vice = miembros.find((m) => m.cargo.toUpperCase() === "VICEPRESIDENTE");
   if (pres) {
     trySet("TITULAR 2", pres.nombre);
     trySet("DNI5", pres.dni);
@@ -277,11 +269,7 @@ export async function generarPdfPia(
     trySet("DNI6", vice.dni);
   }
 
-  // Fechas en pie / cuadro de fojas
-  trySet("D", "15");
-  trySet("M", "05");
-  trySet("A", anioAA);
-  trySet("NRO FOJA", "15");
+  // Las fechas del pie y el número de foja se completan en el PDF
 
   // ==========================================
   // PÁGINA 2: CUADRO DE RECURSOS Y GASTOS
@@ -303,10 +291,9 @@ export async function generarPdfPia(
   trySet("Texto25", financiero.subsidios);
 
   // 3. Otros Ingresos
-  trySet("INGRESO A", "Venta de diarios y reciclados");
+  trySet("INGRESO A", "Otros ingresos");
   trySet("Texto26", financiero.otrosIngresosA);
-  trySet("INGRESO B", "Aportes extraordinarios talleres");
-  trySet("Texto27", financiero.otrosIngresosB);
+  if (financiero.otrosIngresosB > 0) trySet("Texto27", financiero.otrosIngresosB);
 
   const totalEntradas =
     financiero.totalCuotas +
@@ -329,10 +316,7 @@ export async function generarPdfPia(
   trySet("Texto30", financiero.excursiones);
   trySet("Texto31", financiero.emergencias);
   trySet("Texto32", financiero.golosinasPremios);
-  trySet("GASTOS F", "Insumos refrigerio jornadas");
-  trySet("Texto33", "14500");
-  trySet("GASTOS G", "Becas de fotocopias");
-  trySet("Texto34", "9800");
+  // Renglones libres F y G (gastos alumno), H e I (escuela), D y E (entidad): se completan en el PDF
 
   // 2. Gastos Escuela
   trySet("Texto35", financiero.materialDidactico);
@@ -342,24 +326,16 @@ export async function generarPdfPia(
   trySet("Texto39", financiero.combustible);
   trySet("Texto40", financiero.libreria);
   trySet("Texto41", financiero.mobiliario);
-  trySet("GASTOS H", "Pintura y revestimientos");
-  trySet("Texto42", "28000");
-  trySet("GASTOS I", "Seguridad y cerrajería");
-  trySet("Texto43", "12500");
 
   // 3. Gastos Entidad
   trySet("Texto51", financiero.organizacionRifas);
   trySet("Texto52", financiero.organizacionFestivales);
   trySet("Texto53", financiero.gastosKiosco);
-  trySet("GASTOS D", "Gastos bancarios y comisiones");
-  trySet("Texto54", "8200");
-  trySet("GASTOS E", "Trámites personería y sellados");
-  trySet("Texto55", "4500");
 
   // 4. Otros Gastos
-  trySet("Texto50", "Contratación de sonido para acto escolar");
+  trySet("Texto50", "Gastos administrativos");
   trySet("Texto56", financiero.otrosGastosA);
-  trySet("Texto49", "Fletes y acarreos de donaciones");
+  trySet("Texto49", "Otros egresos");
   trySet("Texto57", financiero.otrosGastosB);
 
   const totalSalidas =
@@ -368,8 +344,6 @@ export async function generarPdfPia(
     financiero.excursiones +
     financiero.emergencias +
     financiero.golosinasPremios +
-    14500 +
-    9800 +
     financiero.materialDidactico +
     financiero.mantSubsidios +
     financiero.mantFondosPropios +
@@ -377,13 +351,9 @@ export async function generarPdfPia(
     financiero.combustible +
     financiero.libreria +
     financiero.mobiliario +
-    28000 +
-    12500 +
     financiero.organizacionRifas +
     financiero.organizacionFestivales +
     financiero.gastosKiosco +
-    8200 +
-    4500 +
     financiero.otrosGastosA +
     financiero.otrosGastosB;
 
@@ -400,16 +370,8 @@ export async function generarPdfPia(
   trySet("Texto47", totalSalidas);
   trySet("Texto48", saldoProximoEjercicio);
 
-  // Distribución del saldo
-  const restoCajaChica = financiero.cajaChicaAprobada > 15000 ? 12000 : 8000;
-  const enBancoCC = saldoProximoEjercicio - restoCajaChica;
-  trySet("CC", enBancoCC);
-  trySet("PF", "0");
-  trySet("EFECTIVO", restoCajaChica);
-
-  // Observaciones
-  trySet("OBSERVACIONES 1", "Balance aprobado por asamblea ordinaria sin objeciones.");
-  trySet("OBSERVACIONES 2", "Libros contables rubricados y al día con comprobantes respaldatorios.");
+  // La distribución del saldo (cuenta corriente, plazo fijo, efectivo) y las observaciones
+  // dependen de dónde está el dinero, que la caja no distingue: se completan en el PDF
 
   // Datos Bancarios
   trySet("DATOS BANCO", institucion.bancoNombre);
@@ -417,14 +379,7 @@ export async function generarPdfPia(
   trySet("CUENTA CORRIENTE", institucion.cuentaCorriente);
   trySet("CBU", institucion.cbu);
 
-  // Kiosco Escolar (Posee propio)
-  tryCheck("Check Box194"); // Posee SI
-  tryCheck("Check Box196"); // Propio
-
-  // Fecha al pie Página 2 (Sección Kiosco / Cierre en formato AA)
-  trySet("DIA 2", "15");
-  trySet("MES 2", "05");
-  trySet("AÑO 2", anioAA);
+  // Kiosco escolar y fecha al pie de la página 2: se completan en el PDF
 
   return pdfDoc.save();
 }
