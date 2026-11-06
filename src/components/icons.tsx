@@ -59,6 +59,18 @@ export function NavIcon({ route }: { route?: string }) {
       </svg>
     );
   }
+  if (route === "actas") {
+    return (
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <path d="m14.5 4.5 5 5" />
+        <path d="m13 3 8 8-3 3-8-8z" />
+        <path d="m10 10-7 7" />
+        <path d="m4 20 3-3" />
+        <path d="M2 22h10" />
+        <path d="m9 12 3 3" />
+      </svg>
+    );
+  }
   if (route === "documentacion") {
     return (
       <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">

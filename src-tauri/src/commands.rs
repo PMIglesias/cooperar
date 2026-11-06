@@ -937,10 +937,38 @@ pub fn guardar_acta_detallada(st: State<AppState>, datos: GuardarActaDetallada) 
             params![id, decision.orden, decision.descripcion.trim(), decision.resultado, decision.observacion.trim()],
         ).map_err(s)?;
     }
+
     tx.commit().map_err(s)?;
     auditar(&db, u.id, "GUARDAR", "acta", Some(id))?;
     drop(db);
     listar_actas(st).and_then(|items| items.into_iter().find(|a| a.id == id).ok_or_else(|| "No se pudo recuperar el acta guardada".to_string()))
+}
+
+#[tauri::command]
+pub fn aprobar_acta(st: State<AppState>, id: i64) -> R<()> {
+    let u = auth_presidente_o_admin(&st)?;
+    let db = st.db.lock().map_err(s)?;
+    let updated = db.execute(
+        "UPDATE actas SET estado='Firmada' WHERE id=?1 AND estado='Borrador'",
+        params![id],
+    ).map_err(s)?;
+    if updated == 0 {
+        return Err("El acta no existe o ya fue aprobada".to_string());
+    }
+    auditar(&db, u.id, "APROBAR", "acta", Some(id))
+}
+
+#[tauri::command]
+pub fn eliminar_acta(st: State<AppState>, id: i64) -> R<()> {
+    let u = auth_superadmin(&st)?;
+    let db = st.db.lock().map_err(s)?;
+    let tx = db.unchecked_transaction().map_err(s)?;
+    let deleted = tx.execute("DELETE FROM actas WHERE id=?1", params![id]).map_err(s)?;
+    if deleted == 0 {
+        return Err("El acta no existe".to_string());
+    }
+    tx.commit().map_err(s)?;
+    auditar(&db, u.id, "ELIMINAR", "acta", Some(id))
 }
 
 // ----------------------------------------------------
@@ -964,22 +992,46 @@ pub struct RendicionFila {
     pub saldo_periodo: i64,
 }
 
+#[derive(Serialize, Deserialize)]
+struct RendicionSnapshot {
+    lineas: Vec<LineaRendicion>,
+    meses: Vec<MesRendicion>,
+}
+
 #[tauri::command]
 pub fn listar_rendiciones(st: State<AppState>) -> R<Vec<RendicionFila>> {
     auth(&st)?;
     let db = st.db.lock().map_err(s)?;
     let mut q = db.prepare(
         "SELECT r.id, r.periodo, r.desde, r.hasta, r.generada_en, u1.nombre, r.estado, u2.nombre, r.aprobada_en,
-                (SELECT COALESCE(SUM(monto),0) FROM movimientos_caja WHERE tipo='Ingreso' AND anulado=0 AND fecha BETWEEN r.desde AND r.hasta) as ing,
-                (SELECT COALESCE(SUM(monto),0) FROM movimientos_caja WHERE tipo='Egreso' AND anulado=0 AND fecha BETWEEN r.desde AND r.hasta) as egr
+                r.snapshot
          FROM rendiciones r
          JOIN usuarios u1 ON u1.id = r.generada_por
          LEFT JOIN usuarios u2 ON u2.id = r.aprobada_por
          ORDER BY r.desde DESC, r.id DESC",
     ).map_err(s)?;
     let rows = q.query_map([], |r| {
-        let ing: i64 = r.get(9)?;
-        let egr: i64 = r.get(10)?;
+        let snapshot: Option<String> = r.get(9)?;
+        let (ing, egr) = snapshot
+            .as_deref()
+            .and_then(|json| serde_json::from_str::<RendicionSnapshot>(json).ok())
+            .map(|s| (
+                s.lineas.iter().filter(|l| l.tipo == "Ingreso").map(|l| l.total).sum(),
+                s.lineas.iter().filter(|l| l.tipo == "Egreso").map(|l| l.total).sum(),
+            ))
+            .unwrap_or_else(|| {
+                let desde: String = r.get(2).unwrap_or_default();
+                let hasta: String = r.get(3).unwrap_or_default();
+                let ing = db.query_row(
+                    "SELECT COALESCE(SUM(monto),0) FROM movimientos_caja WHERE tipo='Ingreso' AND anulado=0 AND fecha BETWEEN ?1 AND ?2",
+                    params![desde, hasta], |row| row.get(0),
+                ).unwrap_or(0);
+                let egr = db.query_row(
+                    "SELECT COALESCE(SUM(monto),0) FROM movimientos_caja WHERE tipo='Egreso' AND anulado=0 AND fecha BETWEEN ?1 AND ?2",
+                    params![desde, hasta], |row| row.get(0),
+                ).unwrap_or(0);
+                (ing, egr)
+            });
         Ok(RendicionFila {
             id: r.get(0)?, periodo: r.get(1)?, desde: r.get(2)?, hasta: r.get(3)?,
             generada_en: r.get(4)?, generada_por: r.get(5)?, estado: r.get(6)?,
@@ -991,7 +1043,7 @@ pub fn listar_rendiciones(st: State<AppState>) -> R<Vec<RendicionFila>> {
     Ok(v)
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LineaRendicion {
     pub tipo: String,
@@ -999,8 +1051,21 @@ pub struct LineaRendicion {
     pub total: i64,
 }
 
+fn snapshot_de_rendicion(db: &Connection, id: i64) -> R<Option<RendicionSnapshot>> {
+    let (estado, snapshot): (String, Option<String>) = db.query_row(
+        "SELECT estado, snapshot FROM rendiciones WHERE id=?1", params![id],
+        |r| Ok((r.get(0)?, r.get(1)?)),
+    ).map_err(|_| "La rendición de cuentas no existe".to_string())?;
+    if estado != "Aprobada" {
+        return Ok(None);
+    }
+    snapshot
+        .map(|json| serde_json::from_str(&json).map_err(s))
+        .transpose()
+}
+
 /// Totales por tipo y categoría de los movimientos no anulados del período de la rendición
-pub fn detalle_rendicion_interno(db: &Connection, id: i64) -> R<Vec<LineaRendicion>> {
+pub fn detalle_rendicion_actual(db: &Connection, id: i64) -> R<Vec<LineaRendicion>> {
     let (desde, hasta): (String, String) = db.query_row(
         "SELECT desde, hasta FROM rendiciones WHERE id=?1",
         params![id],
@@ -1021,6 +1086,13 @@ pub fn detalle_rendicion_interno(db: &Connection, id: i64) -> R<Vec<LineaRendici
     Ok(v)
 }
 
+pub fn detalle_rendicion_interno(db: &Connection, id: i64) -> R<Vec<LineaRendicion>> {
+    if let Some(snapshot) = snapshot_de_rendicion(db, id)? {
+        return Ok(snapshot.lineas);
+    }
+    detalle_rendicion_actual(db, id)
+}
+
 #[tauri::command]
 pub fn detalle_rendicion(st: State<AppState>, id: i64) -> R<Vec<LineaRendicion>> {
     auth(&st)?;
@@ -1028,7 +1100,7 @@ pub fn detalle_rendicion(st: State<AppState>, id: i64) -> R<Vec<LineaRendicion>>
     detalle_rendicion_interno(&db, id)
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MesRendicion {
     /// AAAA-MM
@@ -1038,7 +1110,7 @@ pub struct MesRendicion {
 }
 
 /// Totales de cada mes del período de la rendición; los meses sin movimientos van en 0
-pub fn detalle_mensual_rendicion_interno(db: &Connection, id: i64) -> R<Vec<MesRendicion>> {
+pub fn detalle_mensual_rendicion_actual(db: &Connection, id: i64) -> R<Vec<MesRendicion>> {
     let (desde, hasta): (String, String) = db.query_row(
         "SELECT desde, hasta FROM rendiciones WHERE id=?1",
         params![id],
@@ -1081,6 +1153,13 @@ pub fn detalle_mensual_rendicion_interno(db: &Connection, id: i64) -> R<Vec<MesR
     Ok(meses)
 }
 
+pub fn detalle_mensual_rendicion_interno(db: &Connection, id: i64) -> R<Vec<MesRendicion>> {
+    if let Some(snapshot) = snapshot_de_rendicion(db, id)? {
+        return Ok(snapshot.meses);
+    }
+    detalle_mensual_rendicion_actual(db, id)
+}
+
 #[tauri::command]
 pub fn detalle_mensual_rendicion(st: State<AppState>, id: i64) -> R<Vec<MesRendicion>> {
     auth(&st)?;
@@ -1113,24 +1192,25 @@ pub fn crear_rendicion(st: State<AppState>, datos: DatosRendicion) -> R<i64> {
 pub fn aprobar_rendicion(st: State<AppState>, id: i64) -> R<()> {
     let u = auth_presidente_o_admin(&st)?;
     let db = st.db.lock().map_err(s)?;
+    let snapshot = RendicionSnapshot {
+        lineas: detalle_rendicion_actual(&db, id)?,
+        meses: detalle_mensual_rendicion_actual(&db, id)?,
+    };
     db.execute(
-        "UPDATE rendiciones SET estado='Aprobada', aprobada_por=?1, aprobada_en=date('now','localtime') WHERE id=?2",
-        params![u.id, id],
+        "UPDATE rendiciones SET estado='Aprobada', aprobada_por=?1, aprobada_en=date('now','localtime'), snapshot=?2
+         WHERE id=?3 AND estado='Borrador'",
+        params![u.id, serde_json::to_string(&snapshot).map_err(s)?, id],
     ).map_err(s)?;
     auditar(&db, u.id, "APROBAR", "rendicion", Some(id))?;
     Ok(())
 }
 
 pub fn eliminar_rendicion_interno(db: &Connection, id: i64) -> R<()> {
-    let estado: String = db.query_row(
+    let _: String = db.query_row(
         "SELECT estado FROM rendiciones WHERE id=?1",
         params![id],
         |r| r.get(0),
     ).map_err(|_| "La rendición de cuentas no existe".to_string())?;
-
-    if estado == "Aprobada" {
-        return Err("No se puede eliminar una rendición de cuentas que ya ha sido aprobada".to_string());
-    }
 
     db.execute("DELETE FROM rendiciones WHERE id=?1", params![id]).map_err(s)?;
     Ok(())
@@ -1138,7 +1218,7 @@ pub fn eliminar_rendicion_interno(db: &Connection, id: i64) -> R<()> {
 
 #[tauri::command]
 pub fn eliminar_rendicion(st: State<AppState>, id: i64) -> R<()> {
-    let u = auth_tesorero_o_admin(&st)?;
+    let u = auth_superadmin(&st)?;
     let db = st.db.lock().map_err(s)?;
     eliminar_rendicion_interno(&db, id)?;
     auditar(&db, u.id, "ELIMINAR", "rendicion", Some(id))

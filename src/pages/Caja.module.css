@@ -68,6 +68,13 @@
   margin-bottom: var(--space-5);
 }
 
+.movementsList {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+}
+
 .anularBtn {
   background: none;
   border: 1px solid var(--color-border);

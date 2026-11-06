@@ -172,12 +172,22 @@ export default function Documentacion() {
         .filter((m) => m.fecha < ejercicio.desde)
         .reduce((acc, m) => acc + (m.tipo === "Ingreso" ? m.monto : -m.monto), 0);
 
-      const totalPor = (tipo: "Ingreso" | "Egreso", categorias: string[]) =>
-        lineasRendicion
-          .filter((m: LineaRendicion) => m.tipo === tipo && categorias.includes(m.categoria))
+      const normalizarCategoria = (categoria: string) =>
+        categoria
+          .trim()
+          .toLocaleLowerCase("es-AR")
+          .normalize("NFD")
+          .replace(/[\u0300-\u036f]/g, "");
+      const totalPor = (tipo: "Ingreso" | "Egreso", categorias: string[]) => {
+        const buscadas = categorias.map(normalizarCategoria);
+        return lineasRendicion
+          .filter((m: LineaRendicion) => m.tipo === tipo && buscadas.includes(normalizarCategoria(m.categoria)))
           .reduce((acc, m) => acc + m.total, 0);
-      const ING_MAPEADOS = ["Cuotas", "Donaciones", "Eventos y Festivales", "Subsidios"];
-      const EGR_MAPEADOS = ["Mantenimiento y Reparaciones", "Material Didáctico y Librería", "Artículos de Limpieza", "Equipamiento y Mobiliario", "Gastos Administrativos"];
+      };
+      const ING_MAPEADOS = ["Cuota Social", "Donación de dinero", "Rifas", "Festivales, actos, quermese", "Kiosco", "Intereses bancarios", "Reintegrados banco (débitos, mant., etc.)", "Subsidios de la DGCYE"];
+      const EGR_MAPEADOS = ["Ropa y calzado", "Libros y útiles", "Excursiones", "Emergencias sanitarias", "Golosinas, premios y medallas", "Material didáctico", "Mant. y mejoras con subsidios", "Mant. y mejoras con fondos propios", "Artículos de limpieza", "Combustible y calefacción", "Librería", "Mobiliario", "Organización de rifas", "Organización de festivales", "Kiosco", "Gastos administrativos", "Otros egresos"];
+      const kioscoIngreso = totalPor("Ingreso", ["Kiosco"]);
+      const kioscoEgreso = totalPor("Egreso", ["Kiosco"]);
       const otrosIngresos = lineasRendicion
         .filter((m: LineaRendicion) => m.tipo === "Ingreso" && !ING_MAPEADOS.includes(m.categoria))
         .reduce((acc, m) => acc + m.total, 0);
@@ -189,14 +199,14 @@ export default function Documentacion() {
       const financiero: DatosFinancierosPia = {
         saldoInicialCaja,
         saldoInicialBanco: 0,
-        totalCuotas: totalPor("Ingreso", ["Cuotas"]),
-        totalDonaciones: totalPor("Ingreso", ["Donaciones"]),
-        totalRifas: 0,
-        totalFestivales: totalPor("Ingreso", ["Eventos y Festivales"]),
-        totalKiosco: 0,
-        intereses: 0,
-        reintegrados: 0,
-        subsidios: totalPor("Ingreso", ["Subsidios"]),
+        totalCuotas: totalPor("Ingreso", ["Cuota Social"]),
+        totalDonaciones: totalPor("Ingreso", ["Donación de dinero"]),
+        totalRifas: totalPor("Ingreso", ["Rifas"]),
+        totalFestivales: totalPor("Ingreso", ["Festivales, actos, quermese"]),
+        totalKiosco: kioscoIngreso,
+        intereses: totalPor("Ingreso", ["Intereses bancarios"]),
+        reintegrados: totalPor("Ingreso", ["Reintegrados banco (débitos, mant., etc.)"]),
+        subsidios: totalPor("Ingreso", ["Subsidios de la DGCYE"]),
         otrosIngresosA: otrosIngresos,
         otrosIngresosB: 0,
         ropaCalzado: 0,
@@ -204,17 +214,17 @@ export default function Documentacion() {
         excursiones: 0,
         emergencias: 0,
         golosinasPremios: 0,
-        materialDidactico: totalPor("Egreso", ["Material Didáctico y Librería"]),
-        mantSubsidios: 0,
-        mantFondosPropios: totalPor("Egreso", ["Mantenimiento y Reparaciones"]),
-        limpieza: totalPor("Egreso", ["Artículos de Limpieza"]),
-        combustible: 0,
-        libreria: 0,
-        mobiliario: totalPor("Egreso", ["Equipamiento y Mobiliario"]),
-        organizacionRifas: 0,
-        organizacionFestivales: 0,
-        gastosKiosco: 0,
-        otrosGastosA: totalPor("Egreso", ["Gastos Administrativos"]),
+        materialDidactico: totalPor("Egreso", ["Material didáctico"]),
+        mantSubsidios: totalPor("Egreso", ["Mant. y mejoras con subsidios"]),
+        mantFondosPropios: totalPor("Egreso", ["Mant. y mejoras con fondos propios"]),
+        limpieza: totalPor("Egreso", ["Artículos de limpieza"]),
+        combustible: totalPor("Egreso", ["Combustible y calefacción"]),
+        libreria: totalPor("Egreso", ["Librería"]),
+        mobiliario: totalPor("Egreso", ["Mobiliario"]),
+        organizacionRifas: totalPor("Egreso", ["Organización de rifas"]),
+        organizacionFestivales: totalPor("Egreso", ["Organización de festivales"]),
+        gastosKiosco: kioscoEgreso,
+        otrosGastosA: totalPor("Egreso", ["Gastos administrativos"]),
         otrosGastosB: otrosEgresos,
         cuotaSocialAprobada: 0,
         cajaChicaAprobada: 0,
@@ -230,6 +240,11 @@ export default function Documentacion() {
       financiero.actaCuotaPeriodicidad = acta.cuotaPeriodicidad;
       financiero.cuotaSocialAprobada = acta.cuotaSocial;
       financiero.cajaChicaAprobada = acta.cajaChica;
+      financiero.contratoDesde = acta.cuadroFinanciero.contratoDesde;
+      financiero.contratoHasta = acta.cuadroFinanciero.contratoHasta;
+      financiero.poseeKiosco = acta.cuadroFinanciero.poseeKiosco;
+      financiero.kioscoPropio = acta.cuadroFinanciero.kioscoPropio;
+      financiero.kioscoLicitado = acta.cuadroFinanciero.kioscoLicitado;
 
       const pdfBytes = await generarPdfPia(institucion, comision, financiero, ejercicioActual);
       const pdfBase64 = uint8ArrayToBase64(pdfBytes);
@@ -246,6 +261,13 @@ export default function Documentacion() {
         institucion,
         autoridades: comision,
         ...financiero,
+        contratoDesde: acta.cuadroFinanciero.contratoDesde,
+        contratoHasta: acta.cuadroFinanciero.contratoHasta,
+        poseeKiosco: acta.cuadroFinanciero.poseeKiosco,
+        kioscoPropio: acta.cuadroFinanciero.kioscoPropio,
+        kioscoLicitado: acta.cuadroFinanciero.kioscoLicitado,
+        kioscoIngreso,
+        kioscoEgreso,
       });
 
       const guardado = await api.guardarDocumentoAsamblea({

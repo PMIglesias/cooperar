@@ -17,31 +17,64 @@ const TIPOS_FILTRO = ["Todos", "Ingreso", "Egreso"];
 
 const CATEGORIAS_FILTRO = [
   "Todas",
-  "Cuotas",
-  "Donaciones",
-  "Subsidios",
-  "Eventos y Festivales",
-  "Mantenimiento y Reparaciones",
-  "Material Didáctico y Librería",
-  "Artículos de Limpieza",
-  "Equipamiento y Mobiliario",
+  "Cuota Social",
+  "Donación de dinero",
+  "Rifas",
+  "Festivales, actos, quermese",
+  "Kiosco",
+  "Intereses bancarios",
+  "Reintegrados banco (débitos, mant., etc.)",
+  "Subsidios de la DGCYE",
+  "Ropa y calzado",
+  "Libros y útiles",
+  "Excursiones",
+  "Emergencias sanitarias",
+  "Golosinas, premios y medallas",
+  "Material didáctico",
+  "Mant. y mejoras con subsidios",
+  "Mant. y mejoras con fondos propios",
+  "Artículos de limpieza",
+  "Combustible y calefacción",
+  "Librería",
+  "Mobiliario",
+  "Organización de rifas",
+  "Organización de festivales",
+  "Gastos administrativos",
+  "Otros egresos",
   "Otros",
 ];
 
 const CATEGORIAS_INGRESO = [
-  "Donaciones",
-  "Subsidios",
-  "Eventos y Festivales",
-  "Otros Ingresos",
+  "Cuota Social",
+  "Donación de dinero",
+  "Rifas",
+  "Festivales, actos, quermese",
+  "Kiosco",
+  "Intereses bancarios",
+  "Reintegrados banco (débitos, mant., etc.)",
+  "Subsidios de la DGCYE",
+  "Otros",
 ];
 
 const CATEGORIAS_EGRESO = [
-  "Mantenimiento y Reparaciones",
-  "Material Didáctico y Librería",
-  "Artículos de Limpieza",
-  "Equipamiento y Mobiliario",
-  "Gastos Administrativos",
-  "Otros Egresos",
+  "Ropa y calzado",
+  "Libros y útiles",
+  "Excursiones",
+  "Emergencias sanitarias",
+  "Golosinas, premios y medallas",
+  "Material didáctico",
+  "Mant. y mejoras con subsidios",
+  "Mant. y mejoras con fondos propios",
+  "Artículos de limpieza",
+  "Combustible y calefacción",
+  "Librería",
+  "Mobiliario",
+  "Organización de rifas",
+  "Organización de festivales",
+  "Kiosco",
+  "Gastos administrativos",
+  "Otros egresos",
+  "Otros",
 ];
 
 export default function Caja() {
@@ -59,6 +92,7 @@ export default function Caja() {
   // Formulario Nuevo Movimiento
   const [tipo, setTipo] = useState<"Ingreso" | "Egreso">("Egreso");
   const [categoria, setCategoria] = useState(CATEGORIAS_EGRESO[0]);
+  const [nombreOtraCategoria, setNombreOtraCategoria] = useState("");
   const [fecha, setFecha] = useState(hoyISO());
   const [descripcion, setDescripcion] = useState("");
   const [monto, setMonto] = useState("");
@@ -100,6 +134,7 @@ export default function Caja() {
   const abrirNuevoMovimiento = () => {
     setTipo("Egreso");
     setCategoria(CATEGORIAS_EGRESO[0]);
+    setNombreOtraCategoria("");
     setFecha(hoyISO());
     setDescripcion("");
     setMonto("");
@@ -140,8 +175,8 @@ export default function Caja() {
       setError("El monto debe ser un valor numérico mayor a cero.");
       return;
     }
-    if (!descripcion.trim()) {
-      setError("La descripción es obligatoria.");
+    if (categoria === "Otros" && !nombreOtraCategoria.trim()) {
+      setError("Debe indicar el nombre de la categoría para que se muestre en la rendición y el P.I.A.");
       return;
     }
 
@@ -149,9 +184,10 @@ export default function Caja() {
     setError(null);
     try {
       const compFinal = comprobante.trim() || (archivoAdjunto ? archivoAdjunto : undefined);
+      const categoriaFinal = categoria === "Otros" ? nombreOtraCategoria.trim() : categoria;
       await api.crearMovimientoCaja({
         tipo,
-        categoria,
+        categoria: categoriaFinal,
         descripcion: descripcion.trim(),
         monto: montoNum,
         comprobante: compFinal,
@@ -386,18 +422,21 @@ export default function Caja() {
           />
         </div>
 
-        <DataTable
-          columns={columns}
-          rows={movimientos}
-          rowKey={(m) => m.id}
-          onRowClick={(m) => {
-            setMovimientoSeleccionado(m);
-            setVisorArchivo(null);
-            setImprimirAdjunto(false);
-            setDetalleAltura(null);
-          }}
-          emptyMessage={loading ? "Cargando movimientos de caja..." : "No se encontraron movimientos registrados."}
-        />
+        <div className={s.movementsList}>
+          <DataTable
+            columns={columns}
+            rows={movimientos}
+            rowKey={(m) => m.id}
+            stickyHeader
+            onRowClick={(m) => {
+              setMovimientoSeleccionado(m);
+              setVisorArchivo(null);
+              setImprimirAdjunto(false);
+              setDetalleAltura(null);
+            }}
+            emptyMessage={loading ? "Cargando movimientos de caja..." : "No se encontraron movimientos registrados."}
+          />
+        </div>
 
         {/* Modal de Detalle de Movimiento de Caja */}
         {movimientoSeleccionado && (
@@ -654,6 +693,7 @@ export default function Caja() {
                   onClick={() => {
                     setTipo("Ingreso");
                     setCategoria(CATEGORIAS_INGRESO[0]);
+                    setNombreOtraCategoria("");
                   }}
                 >
                   Ingreso
@@ -664,6 +704,7 @@ export default function Caja() {
                   onClick={() => {
                     setTipo("Egreso");
                     setCategoria(CATEGORIAS_EGRESO[0]);
+                    setNombreOtraCategoria("");
                   }}
                 >
                   Egreso
@@ -690,14 +731,23 @@ export default function Caja() {
               />
             </div>
 
+            {categoria === "Otros" && (
+              <Field
+                label="Nombre de la categoría (se mostrará en la rendición y el P.I.A.)"
+                placeholder="Ej: Donación de materiales"
+                value={nombreOtraCategoria}
+                onChange={(e) => setNombreOtraCategoria(e.target.value)}
+                required
+              />
+            )}
+
             <label className={`${s.field} ${s.fieldGrow}`}>
               <span className={s.label}>Descripción</span>
               <textarea
                 className={s.control}
-                placeholder={tipo === "Ingreso" ? "Ej: Buffet acto escolar día del maestro" : "Ej: Compra de pintura y pinceles"}
+                placeholder={tipo === "Ingreso" ? "Opcional: detalle del ingreso" : "Opcional: detalle del gasto"}
                 value={descripcion}
                 onChange={(e) => setDescripcion(e.target.value)}
-                required
               />
             </label>
 

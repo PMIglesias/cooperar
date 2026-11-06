@@ -66,7 +66,8 @@ CREATE TABLE IF NOT EXISTS rendiciones(
   id INTEGER PRIMARY KEY, periodo TEXT NOT NULL, desde TEXT NOT NULL, hasta TEXT NOT NULL,
   generada_en TEXT NOT NULL, generada_por INTEGER NOT NULL REFERENCES usuarios(id),
   estado TEXT NOT NULL DEFAULT 'Borrador' CHECK(estado IN ('Borrador','Aprobada')),
-  aprobada_por INTEGER REFERENCES usuarios(id), aprobada_en TEXT, pdf TEXT);
+  aprobada_por INTEGER REFERENCES usuarios(id), aprobada_en TEXT, pdf TEXT,
+  snapshot TEXT);
 CREATE TABLE IF NOT EXISTS configuracion(clave TEXT PRIMARY KEY, valor TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS auditoria(
   id INTEGER PRIMARY KEY,
@@ -159,6 +160,7 @@ pub fn init(dir: &Path) -> Result<Connection, Box<dyn std::error::Error>> {
     let _ = conn.execute("ALTER TABLE reuniones ADD COLUMN registrado_por INTEGER REFERENCES usuarios(id)", []);
     let _ = conn.execute("ALTER TABLE actas ADD COLUMN archivo_adjunto TEXT", []);
     let _ = conn.execute("ALTER TABLE actas ADD COLUMN cuadro_financiero TEXT NOT NULL DEFAULT '{}'", []);
+    let _ = conn.execute("ALTER TABLE rendiciones ADD COLUMN snapshot TEXT", []);
     let _ = conn.execute("ALTER TABLE comision_directiva ADD COLUMN asociado_id INTEGER REFERENCES asociados(id) ON DELETE SET NULL", []);
     let _ = conn.execute("ALTER TABLE comision_directiva ADD COLUMN personal_establecimiento_id INTEGER REFERENCES personal_establecimiento(id) ON DELETE SET NULL", []);
     let _ = conn.execute("ALTER TABLE asociados ADD COLUMN tipo_vinculo TEXT NOT NULL DEFAULT 'PADRE_TUTOR'", []);

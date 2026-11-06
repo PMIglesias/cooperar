@@ -447,17 +447,18 @@ let mockPagos: PagoFila[] = [
 const mockAdjuntos: Record<number, AdjuntoMovimiento> = {};
 
 let mockMovimientos: MovimientoCajaFila[] = [
-  { id: 5, fecha: "2026-10-06", tipo: "Ingreso", categoria: "Cuotas", descripcion: "Cobro cuotas mes en curso", monto: 48000, comprobante: "LOT-102", anulado: 0 },
-  { id: 4, fecha: "2026-10-04", tipo: "Egreso", categoria: "Mantenimiento", descripcion: "Reparación luminarias patio y pasillos", monto: 45000, comprobante: "FAC-8890", anulado: 0 },
-  { id: 3, fecha: "2026-10-02", tipo: "Ingreso", categoria: "Eventos", descripcion: "Recaudación kermesse familiar escolar", monto: 185000, comprobante: "ACT-012", anulado: 0 },
-  { id: 2, fecha: "2026-09-29", tipo: "Egreso", categoria: "Insumos", descripcion: "Compra de artículos de limpieza y desinfección", monto: 25400, comprobante: "FAC-1102", anulado: 0 },
-  { id: 1, fecha: "2026-09-27", tipo: "Ingreso", categoria: "Cuotas", descripcion: "Cobro cuotas societarias mes anterior", monto: 56000, comprobante: "LOT-101", anulado: 0 },
+  { id: 5, fecha: "2026-10-06", tipo: "Ingreso", categoria: "Cuota Social", descripcion: "Cobro cuotas mes en curso", monto: 48000, comprobante: "LOT-102", anulado: 0 },
+  { id: 4, fecha: "2026-10-04", tipo: "Egreso", categoria: "Mant. y mejoras con fondos propios", descripcion: "Reparación luminarias patio y pasillos", monto: 45000, comprobante: "FAC-8890", anulado: 0 },
+  { id: 3, fecha: "2026-10-02", tipo: "Ingreso", categoria: "Festivales, actos, quermese", descripcion: "Recaudación kermesse familiar escolar", monto: 185000, comprobante: "ACT-012", anulado: 0 },
+  { id: 2, fecha: "2026-09-29", tipo: "Egreso", categoria: "Artículos de limpieza", descripcion: "Compra de artículos de limpieza y desinfección", monto: 25400, comprobante: "FAC-1102", anulado: 0 },
+  { id: 1, fecha: "2026-09-27", tipo: "Ingreso", categoria: "Cuota Social", descripcion: "Cobro cuotas societarias mes anterior", monto: 56000, comprobante: "LOT-101", anulado: 0 },
 ];
 
 let mockReuniones: ReunionFila[] = [
   { id: 1, fecha: "2026-10-19", tipo: "Comisión", temas: "Planificación mejoras edilicias de verano, presupuesto pintura y balance de cuotas.", acta: null, asistentesCount: 0 },
   { id: 2, fecha: "2026-09-17", tipo: "Asamblea", temas: "Aprobación de memoria y balance anual. Renovación parcial de autoridades.", acta: "En la ciudad, reunidos los miembros en asamblea ordinaria, se aprueba por unanimidad la memoria y balance del ejercicio anterior. Se ratifican los cargos directivos.", asistentesCount: 18 },
 ];
+let mockActas: ActaFila[] = [];
 
 let mockRendiciones: RendicionFila[] = [
   { id: 1, periodo: "Septiembre 2026", desde: "2026-09-01", hasta: "2026-09-30", generadaEn: "2026-10-01 10:00:00", generadaPor: "Roberto Fernández", estado: "Aprobada", aprobadaPor: "Carlos Gómez", aprobadaEn: "2026-10-02 14:30:00", totalIngresos: 241000, totalEgresos: 70400, saldoPeriodo: 170600 },
@@ -671,7 +672,7 @@ export const api = {
       id: Date.now() + 1,
       fecha: nuevoPago.fechaPago,
       tipo: "Ingreso",
-      categoria: "Cuotas",
+      categoria: "Cuota Social",
       descripcion: `Asociado N° ${datos.asociadoId} - ${periodoFmt}\n${nombre}`,
       monto: datos.monto,
       comprobante: nuevoPago.comprobante,
@@ -762,7 +763,7 @@ export const api = {
   },
   listarActas: async (): Promise<ActaFila[]> => {
     if (isTauri) return invoke<ActaFila[]>("listar_actas");
-    return [];
+    return mockActas;
   },
   guardarActaDetallada: async (datos: DatosActa): Promise<ActaFila> => {
     if (isTauri) return invoke<ActaFila>("guardar_acta_detallada", { datos });
@@ -773,7 +774,17 @@ export const api = {
       archivoAdjunto: datos.archivoAdjunto ?? null,
       estado: "Borrador",
     };
+    mockActas = [ahora, ...mockActas.filter((acta) => acta.id !== ahora.id)];
     return ahora;
+  },
+  aprobarActa: async (id: number): Promise<void> => {
+    if (isTauri) return invoke<void>("aprobar_acta", { id });
+    const acta = mockActas.find((item) => item.id === id);
+    if (acta) acta.estado = "Firmada";
+  },
+  eliminarActa: async (id: number): Promise<void> => {
+    if (isTauri) return invoke<void>("eliminar_acta", { id });
+    mockActas = mockActas.filter((acta) => acta.id !== id);
   },
 
   // Rendiciones
@@ -812,11 +823,11 @@ export const api = {
   detalleRendicion: async (id: number): Promise<LineaRendicion[]> => {
     if (isTauri) return invoke<LineaRendicion[]>("detalle_rendicion", { id });
     return [
-      { tipo: "Ingreso", categoria: "Cuotas", total: 185000 },
-      { tipo: "Ingreso", categoria: "Eventos y Festivales", total: 36000 },
-      { tipo: "Ingreso", categoria: "Donaciones", total: 20000 },
-      { tipo: "Egreso", categoria: "Mantenimiento y Reparaciones", total: 38500 },
-      { tipo: "Egreso", categoria: "Material Didáctico y Librería", total: 19400 },
+      { tipo: "Ingreso", categoria: "Cuota Social", total: 185000 },
+      { tipo: "Ingreso", categoria: "Festivales, actos, quermese", total: 36000 },
+      { tipo: "Ingreso", categoria: "Donación de dinero", total: 20000 },
+      { tipo: "Egreso", categoria: "Mant. y mejoras con fondos propios", total: 38500 },
+      { tipo: "Egreso", categoria: "Material didáctico", total: 19400 },
       { tipo: "Egreso", categoria: "Artículos de Limpieza", total: 12500 },
     ];
   },

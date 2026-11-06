@@ -1,5 +1,5 @@
 // src/utils/pdfGenerators.ts
-import { PDFDocument } from "pdf-lib";
+import { PDFDocument, StandardFonts } from "pdf-lib";
 import { MiembroComisionFila, DatosInstitucionales } from "../api";
 
 const formatearFechaDocumento = (valor: string) => {
@@ -159,6 +159,11 @@ export interface DatosFinancierosPia {
   actaSociosAsistentes?: number;
   actaDecisiones?: string[];
   actaCuotaPeriodicidad?: "Mensual" | "Anual";
+  contratoDesde?: string;
+  contratoHasta?: string;
+  poseeKiosco?: boolean;
+  kioscoPropio?: boolean;
+  kioscoLicitado?: boolean;
 }
 
 export async function generarPdfPia(
@@ -174,6 +179,7 @@ export async function generarPdfPia(
 
   const pdfDoc = await PDFDocument.load(existingPdfBytes);
   const form = pdfDoc.getForm();
+  const formFont = await pdfDoc.embedFont(StandardFonts.Helvetica);
 
   const trySet = (name: string, val: string | number) => {
     try {
@@ -190,6 +196,13 @@ export async function generarPdfPia(
       if (cb) cb.check();
     } catch {
       // Ignorar
+    }
+  };
+  const tryUncheck = (name: string) => {
+    try {
+      form.getCheckBox(name).uncheck();
+    } catch {
+      // Ignorar si el campo no es una casilla o no existe
     }
   };
 
@@ -247,6 +260,14 @@ export async function generarPdfPia(
   });
   if (financiero.actaCuotaPeriodicidad === "Mensual") tryCheck("Check Box35");
   if (financiero.actaCuotaPeriodicidad === "Anual") tryCheck("Check Box34");
+  if (financiero.contratoDesde) {
+    trySet("CONTRATO DESDE", formatearFechaDocumento(financiero.contratoDesde));
+    trySet("Contrato desde", formatearFechaDocumento(financiero.contratoDesde));
+  }
+  if (financiero.contratoHasta) {
+    trySet("CONTRATO HASTA", formatearFechaDocumento(financiero.contratoHasta));
+    trySet("Contrato hasta", formatearFechaDocumento(financiero.contratoHasta));
+  }
 
   // Cuadros 3 y 4 (acta, foja, fecha y asistencia de la asamblea, decisiones adoptadas) salen
   // del libro de actas: quedan en blanco para completarlos en el PDF, que conserva sus campos editables
@@ -338,6 +359,7 @@ export async function generarPdfPia(
   trySet("Texto20", financiero.totalRifas);
   trySet("Texto21", financiero.totalFestivales);
   trySet("Texto22", financiero.totalKiosco);
+  trySet("KIOSCO", financiero.totalKiosco);
   trySet("Texto23", financiero.intereses);
   trySet("Texto24", financiero.reintegrados);
 
@@ -385,6 +407,7 @@ export async function generarPdfPia(
   trySet("Texto51", financiero.organizacionRifas);
   trySet("Texto52", financiero.organizacionFestivales);
   trySet("Texto53", financiero.gastosKiosco);
+  trySet("KIOSCO EGRESOS", financiero.gastosKiosco);
 
   // 4. Otros Gastos
   trySet("Texto50", "Gastos administrativos");
@@ -433,8 +456,37 @@ export async function generarPdfPia(
   trySet("CUENTA CORRIENTE", institucion.cuentaCorriente);
   trySet("CBU", institucion.cbu);
 
-  // Kiosco escolar y fecha al pie de la página 2: se completan en el PDF
+  // Kiosco / librería escolar, en la parte inferior de la página 2.
+  if (financiero.poseeKiosco) {
+    tryCheck("Check Box194");
+    tryUncheck("Check Box195");
+    if (financiero.kioscoPropio) {
+      tryCheck("Check Box196");
+      tryUncheck("Check Box197");
+    } else if (financiero.kioscoLicitado) {
+      tryCheck("Check Box197");
+      tryUncheck("Check Box196");
+    }
+  } else {
+    tryCheck("Check Box195");
+    tryUncheck("Check Box194");
+    tryUncheck("Check Box196");
+    tryUncheck("Check Box197");
+  }
+  if (financiero.contratoDesde) {
+    const [anio, mes, dia] = financiero.contratoDesde.split("-");
+    trySet("D", dia || "");
+    trySet("M", mes || "");
+    trySet("A", anio?.slice(-2) || "");
+  }
+  if (financiero.contratoHasta) {
+    const [anio, mes, dia] = financiero.contratoHasta.split("-");
+    trySet("DIA 2", dia || "");
+    trySet("MES 2", mes || "");
+    trySet("AÑO 2", anio?.slice(-2) || "");
+  }
 
+  form.updateFieldAppearances(formFont);
   return pdfDoc.save();
 }
 

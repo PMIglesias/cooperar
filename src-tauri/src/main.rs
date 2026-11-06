@@ -84,6 +84,8 @@ fn main() {
             commands::guardar_acta,
             commands::listar_actas,
             commands::guardar_acta_detallada,
+            commands::aprobar_acta,
+            commands::eliminar_acta,
             commands::listar_rendiciones,
             commands::detalle_rendicion,
             commands::detalle_mensual_rendicion,

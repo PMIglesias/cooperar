@@ -3,8 +3,13 @@ import Layout from "../components/Layout";
 import Card from "../components/ui/Card";
 import Button from "../components/ui/Button";
 import { Field } from "../components/ui/Field";
+import Badge from "../components/ui/Badge";
+import IconButton from "../components/ui/IconButton";
+import { CheckIcon, EditIcon, TrashIcon } from "../components/icons";
 import { ActaFila, api, CuadroFinancieroActa, DatosActa, DecisionActa } from "../api";
 import fieldStyles from "../components/ui/Field.module.css";
+import ConfirmDialog from "../components/ui/ConfirmDialog";
+import { useApp } from "../context";
 
 const DECISIONES_BASE = [
   "Designación de 2 socios para firma del acta",
@@ -45,15 +50,16 @@ function DineroInput({ label, value, onChange }: { label: string; value: string;
   );
 }
 
-function TextoInput({ label, value, onChange }: { label: string; value: string; onChange: (value: string) => void }) {
+function TextoInput({ label, value, onChange, disabled = false }: { label: string; value: string; onChange: (value: string) => void; disabled?: boolean }) {
   return (
     <label style={{ display: "inline-flex", gap: "var(--space-2)", alignItems: "center", minWidth: 0 }}>
       <span className={fieldStyles.label} style={{ flex: "1 1 auto" }}>{label}</span>
       <input
         className={fieldStyles.control}
         style={{ width: 150, flex: "0 0 150px" }}
-        type="text"
+        type={label.startsWith("Contrato") ? "date" : "text"}
         value={value}
+        disabled={disabled}
         onChange={(e) => onChange(e.target.value)}
       />
     </label>
@@ -83,10 +89,15 @@ const nuevaActa = (): DatosActa => ({
 });
 
 export default function Actas() {
+  const { usuario } = useApp();
+  const puedeEditar = usuario.rol === "Secretaria" || usuario.rol === "Presidente" || usuario.rol === "Superadmin";
+  const puedeAprobar = usuario.rol === "Presidente" || usuario.rol === "Superadmin";
+  const puedeEliminar = usuario.rol === "Superadmin";
   const [actas, setActas] = useState<ActaFila[]>([]);
   const [form, setForm] = useState<DatosActa | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [guardando, setGuardando] = useState(false);
+  const [actaParaEliminar, setActaParaEliminar] = useState<ActaFila | null>(null);
 
   const cargar = () => api.listarActas().then(setActas).catch((e) => setError(String(e)));
   useEffect(() => { cargar(); }, []);
@@ -140,6 +151,26 @@ export default function Actas() {
     }
   };
 
+  const aprobar = async (acta: ActaFila) => {
+    try {
+      await api.aprobarActa(acta.id);
+      cargar();
+    } catch (e) {
+      setError(String(e));
+    }
+  };
+
+  const eliminar = async () => {
+    if (!actaParaEliminar) return;
+    try {
+      await api.eliminarActa(actaParaEliminar.id);
+      setActaParaEliminar(null);
+      cargar();
+    } catch (e) {
+      setError(String(e));
+    }
+  };
+
   return (
     <Layout
       title={form ? "Actas" : "Actas de asamblea"}
@@ -162,12 +193,53 @@ export default function Actas() {
                 <div>
                   <strong>Acta N° {acta.numero}</strong>
                   <div>{acta.tipo} · {acta.fechaAsamblea} · Fojas {acta.foja || "sin indicar"}</div>
-                  <small>{acta.decisiones.filter((d) => d.resultado === "APROBADO").length} decisiones aprobadas</small>
+                  <small>{acta.decisiones.filter((d) => d.resultado === "APROBADO").length} decisiones aprobadas · </small>
+                  <Badge tone={acta.estado === "Firmada" ? "ok" : "warn"}>
+                    {acta.estado === "Firmada" ? "Aprobada" : "Borrador"}
+                  </Badge>
                 </div>
-                <Button variant="secondary" onClick={() => editar(acta)}>Editar</Button>
+                <div style={{ display: "flex", gap: "var(--space-2)", alignItems: "center", flexWrap: "wrap", justifyContent: "flex-end" }}>
+                  {puedeEditar && (
+                    <IconButton
+                      icon={<EditIcon />}
+                      title="Editar acta"
+                      variant="primary"
+                      square
+                      onClick={() => editar(acta)}
+                    />
+                  )}
+                  {puedeAprobar && acta.estado === "Borrador" && (
+                    <IconButton
+                      icon={<CheckIcon />}
+                      title="Aprobar acta"
+                      variant="success"
+                      square
+                      onClick={() => aprobar(acta)}
+                    />
+                  )}
+                  {puedeEliminar && (
+                    <IconButton
+                      icon={<TrashIcon />}
+                      title="Eliminar acta"
+                      variant="danger"
+                      square
+                      onClick={() => setActaParaEliminar(acta)}
+                    />
+                  )}
+                </div>
               </div>
             ))}
           </Card>
+          <ConfirmDialog
+            isOpen={actaParaEliminar !== null}
+            title="Eliminar acta"
+            message={actaParaEliminar ? <>¿Está seguro de que desea eliminar el acta <strong>N° {actaParaEliminar.numero}</strong>?</> : null}
+            confirmLabel="Eliminar acta"
+            cancelLabel="Cancelar"
+            variant="danger"
+            onConfirm={eliminar}
+            onCancel={() => setActaParaEliminar(null)}
+          />
         </>
       ) : (
         <Card title="Síntesis del acta de la Asamblea Anual Ordinaria">
@@ -370,21 +442,61 @@ export default function Actas() {
             <span>Posee kiosco / librería escolar:</span>
             {([["poseeKiosco", "Sí"], ["poseeKiosco", "No"]] as const).map(([campo, texto], index) => (
               <label key={texto} style={{ display: "inline-flex", gap: 6, alignItems: "center" }}>
-                <input type="radio" name="posee-kiosco" checked={index === 0 ? form.cuadroFinanciero.poseeKiosco : !form.cuadroFinanciero.poseeKiosco} onChange={() => actualizarCuadro(campo, index === 0)} />
+                <input
+                  type="radio"
+                  name="posee-kiosco"
+                  checked={index === 0 ? form.cuadroFinanciero.poseeKiosco : !form.cuadroFinanciero.poseeKiosco}
+                  onChange={() => {
+                    actualizarCuadro(campo, index === 0);
+                    if (index === 1) {
+                      actualizarCuadro("kioscoPropio", false);
+                      actualizarCuadro("kioscoLicitado", false);
+                      actualizarCuadro("contratoDesde", "");
+                      actualizarCuadro("contratoHasta", "");
+                    }
+                  }}
+                />
                 {texto}
               </label>
             ))}
-            <span>En caso afirmativo:</span>
+            <span style={{ opacity: form.cuadroFinanciero.poseeKiosco ? 1 : 0.5 }}>En caso afirmativo:</span>
             {([["kioscoPropio", "Propio"], ["kioscoLicitado", "Licitado"]] as const).map(([campo, texto]) => (
               <label key={texto} style={{ display: "inline-flex", gap: 6, alignItems: "center" }}>
-                <input type="checkbox" checked={form.cuadroFinanciero[campo]} onChange={(e) => actualizarCuadro(campo, e.target.checked)} />
+                <input
+                  type="radio"
+                  name="tipo-kiosco"
+                  disabled={!form.cuadroFinanciero.poseeKiosco}
+                  checked={form.cuadroFinanciero[campo]}
+                  onChange={() => {
+                    actualizarCuadro(campo, true);
+                    actualizarCuadro(campo === "kioscoPropio" ? "kioscoLicitado" : "kioscoPropio", false);
+                    if (campo === "kioscoPropio") {
+                      actualizarCuadro("contratoDesde", "");
+                      actualizarCuadro("contratoHasta", "");
+                    }
+                  }}
+                />
                 {texto}
               </label>
             ))}
           </div>
           <div style={{ display: "flex", gap: "var(--space-5)", marginTop: "var(--space-3)", flexWrap: "wrap" }}>
-            <TextoInput label="Contrato desde" value={form.cuadroFinanciero.contratoDesde} onChange={(v) => actualizarCuadro("contratoDesde", v)} />
-            <TextoInput label="Contrato hasta" value={form.cuadroFinanciero.contratoHasta} onChange={(v) => actualizarCuadro("contratoHasta", v)} />
+            <div style={{ opacity: form.cuadroFinanciero.poseeKiosco && form.cuadroFinanciero.kioscoLicitado ? 1 : 0.5 }}>
+              <TextoInput
+                label="Contrato desde"
+                value={form.cuadroFinanciero.contratoDesde}
+                disabled={!form.cuadroFinanciero.poseeKiosco || !form.cuadroFinanciero.kioscoLicitado}
+                onChange={(v) => actualizarCuadro("contratoDesde", v)}
+              />
+            </div>
+            <div style={{ opacity: form.cuadroFinanciero.poseeKiosco && form.cuadroFinanciero.kioscoLicitado ? 1 : 0.5 }}>
+              <TextoInput
+                label="Contrato hasta"
+                value={form.cuadroFinanciero.contratoHasta}
+                disabled={!form.cuadroFinanciero.poseeKiosco || !form.cuadroFinanciero.kioscoLicitado}
+                onChange={(v) => actualizarCuadro("contratoHasta", v)}
+              />
+            </div>
           </div>
         </Card>
       )}

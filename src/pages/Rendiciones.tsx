@@ -17,6 +17,7 @@ export default function Rendiciones() {
   const { usuario } = useApp();
   const puedeCrear = usuario.rol === "Tesorero" || usuario.rol === "Superadmin";
   const puedeAprobar = usuario.rol === "Presidente" || usuario.rol === "Superadmin";
+  const puedeEliminar = usuario.rol === "Superadmin";
   const [vista, setVista] = useState<"lista" | "nuevo" | "detalle">("lista");
 
   const [rendiciones, setRendiciones] = useState<RendicionFila[]>([]);
@@ -321,7 +322,7 @@ export default function Rendiciones() {
             )}
           </div>
           <div style={{ width: 32, height: 32, display: "flex", alignItems: "center", justifyContent: "center" }}>
-            {puedeCrear && r.estado === "Borrador" && (
+            {puedeEliminar && (
               <IconButton
                 icon={<TrashIcon />}
                 title="Eliminar rendición"
@@ -626,7 +627,7 @@ export default function Rendiciones() {
                 {aprobando ? "Aprobando..." : "✓ Aprobar rendición formalmente"}
               </Button>
             )}
-            {puedeCrear && rendicionSeleccionada.estado === "Borrador" && (
+            {puedeEliminar && rendicionSeleccionada.estado === "Borrador" && (
               <Button
                 variant="danger"
                 onClick={() =>
