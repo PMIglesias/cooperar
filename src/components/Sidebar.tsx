@@ -11,6 +11,7 @@ const ITEMS: { route: Route; label: string | [string, string]; labelText: string
   { route: "cuotas", label: "Cuotas y pagos", labelText: "Cuotas y pagos" },
   { route: "caja", label: "Caja", labelText: "Caja" },
   { route: "reuniones", label: "Reuniones", labelText: "Reuniones" },
+  { route: "actas", label: "Actas", labelText: "Actas de asamblea" },
   { route: "rendiciones", label: "Rendiciones", labelText: "Rendiciones" },
   { route: "documentacion", label: ["Documentación", "Asambleas"], labelText: "Documentación Asambleas" },
   { route: "comision", label: ["Comisión", "Directiva"], labelText: "Comisión Directiva" },
@@ -34,7 +35,7 @@ export default function Sidebar() {
     // Secretaria: gestión institucional (Asociados, Reuniones, Documentación, Comisión Directiva)
     // NO tiene acceso a finanzas: Caja ni Cuotas y pagos
     if (usuario.rol === "Secretaria") {
-      return ["inicio", "asociados", "reuniones", "documentacion", "comision"].includes(it.route);
+      return ["inicio", "asociados", "reuniones", "actas", "documentacion", "comision"].includes(it.route);
     }
 
     // Tesorero: gestión financiera y económica (Cuotas, Caja, Rendiciones)
@@ -45,7 +46,7 @@ export default function Sidebar() {
 
     // Presidente: supervisión y gobierno institucional (Inicio, Asociados [lectura], Caja [lectura], Rendiciones [aprobación], Reuniones, Documentación, Comisión)
     if (usuario.rol === "Presidente") {
-      return ["inicio", "asociados", "caja", "reuniones", "rendiciones", "documentacion", "comision"].includes(it.route);
+      return ["inicio", "asociados", "caja", "reuniones", "actas", "rendiciones", "documentacion", "comision"].includes(it.route);
     }
 
     return true;

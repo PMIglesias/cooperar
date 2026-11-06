@@ -2,6 +2,11 @@
 import { PDFDocument } from "pdf-lib";
 import { MiembroComisionFila, DatosInstitucionales } from "../api";
 
+const formatearFechaDocumento = (valor: string) => {
+  const iso = valor.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  return iso ? `${iso[3]}/${iso[2]}/${iso[1]}` : valor;
+};
+
 export async function generarPdfNomina(
   miembros: MiembroComisionFila[],
   institucion: DatosInstitucionales,
@@ -35,56 +40,79 @@ export async function generarPdfNomina(
   trySet("text_3gqed", institucion.numeroEscuela);
   trySet("text_4ulwg", institucion.asociacionNombre);
 
-  // 16 filas de 6 campos: Cargo, Apellido y Nombre, Documento, Domicilio, Localidad, Vencimiento
-  // Fila 1: text_5tqre, text_6ejdd, text_7dovh, text_8yqyo, text_9mftm, text_10oxfg
-  // Fila 2: text_11xekx, text_12mdfp, text_13cstz, text_14gknp, text_15pknk, text_16ghv
-  // Fila 3: text_17yfqe, text_18zchm, text_19yqnr, text_20lffq, text_21dhyh, text_22iwwu
-  // Fila 4: text_23yvob, text_24nhce, text_25xchw, text_26gxfc, text_27vjsc, text_28yqvi
-  // Fila 5: text_29qbbh, text_30nrmc, text_31mtyt, text_32pysw, text_33ovw, text_34bky
-  // Fila 6: text_35kvyv, text_36eqg, text_37rthk, text_38xoyw, text_39lycr, text_40sugv
-  // Fila 7: text_41slln, text_42ovur, text_43lqvd, text_44zhlx, text_45qmsf, text_46puxd
-  // Fila 8: text_47oijx, text_48edov, text_49sokd, text_50hsgf, text_51tqqj, text_52pysx
-  // Fila 9: text_53mpyk, text_54zhlm, text_55mknq, text_56ubve, text_57hhyz, text_58fchx
-  // Fila 10: text_59womz, text_60pgyq, text_61mlyy, text_62tyec, text_63fvyy, text_64gqch
-  // Fila 11: text_65tyer, text_66yylf, text_67jffp, text_68eqkc, text_69mhyg, text_70whfs
-  // Fila 12: text_71kkmr, text_72wugt, text_73srmd, text_74oouo, text_75nhym, text_76yypx
-  // Fila 13: text_77ehmh, text_78gtyc, text_79tyep, text_80ffkc, text_81kkmr, text_82yypx
-  // Fila 14: text_83xocp, text_84lyeb, text_85yqvb, text_86wwyc, text_87tyem, text_88pysm
-  // Fila 15: text_89bkov, text_90uuyt, text_91mkyq, text_92qwec, text_93kklm, text_94yytr
-  // Fila 16: text_95trmb, text_96oihc, text_97qwer, text_98tyup, text_99asdf, text_100ghjk
+  // Las primeras filas tienen seis campos editables (cargo y cinco datos).
+  // Las últimas cuatro tienen el cargo fijo y cinco campos editables desde la
+  // columna 2: nombre, documento, domicilio, localidad y vencimiento.
 
   const rowFieldNames = [
-    ["text_5tqre", "text_6ejdd", "text_7dovh", "text_8yqyo", "text_9mftm", "text_10oxfg"],
-    ["text_11xekx", "text_12mdfp", "text_13cstz", "text_14gknp", "text_15pknk", "text_16ghv"],
-    ["text_17yfqe", "text_18zchm", "text_19yqnr", "text_20lffq", "text_21dhyh", "text_22iwwu"],
-    ["text_23yvob", "text_24nhce", "text_25xchw", "text_26gxfc", "text_27vjsc", "text_28yqvi"],
-    ["text_29qbbh", "text_30nrmc", "text_31mtyt", "text_32pysw", "text_33ovw", "text_34bky"],
-    ["text_35kvyv", "text_36eqg", "text_37rthk", "text_38xoyw", "text_39lycr", "text_40sugv"],
-    ["text_41slln", "text_42ovur", "text_43lqvd", "text_44zhlx", "text_45qmsf", "text_46puxd"],
-    ["text_47oijx", "text_48edov", "text_49sokd", "text_50hsgf", "text_51tqqj", "text_52pysx"],
-    ["text_53mpyk", "text_54zhlm", "text_55mknq", "text_56ubve", "text_57hhyz", "text_58fchx"],
-    ["text_59womz", "text_60pgyq", "text_61mlyy", "text_62tyec", "text_63fvyy", "text_64gqch"],
-    ["text_65tyer", "text_66yylf", "text_67jffp", "text_68eqkc", "text_69mhyg", "text_70whfs"],
-    ["text_71kkmr", "text_72wugt", "text_73srmd", "text_74oouo", "text_75nhym", "text_76yypx"],
-    ["text_77ehmh", "text_78gtyc", "text_79tyep", "text_80ffkc", "text_81kkmr", "text_82yypx"],
-    ["text_83xocp", "text_84lyeb", "text_85yqvb", "text_86wwyc", "text_87tyem", "text_88pysm"],
-    ["text_89bkov", "text_90uuyt", "text_91mkyq", "text_92qwec", "text_93kklm", "text_94yytr"],
-    ["text_95trmb", "text_96oihc", "text_97qwer", "text_98tyup", "text_99asdf", "text_100ghjk"],
+    ["text_5gnqf", "text_6odby", "text_7llzz", "text_8nbmm", "text_9efsq", "text_10hvyf"],
+    ["text_11gukb", "text_12nliv", "text_13akhj", "text_14djll", "text_15axie", "text_16lgxa"],
+    ["text_17cebc", "text_18nejc", "text_19btlx", "text_20pwmq", "text_21pwnm", "text_22zumy"],
+    ["text_23zykq", "text_24ogyd", "text_25oucb", "text_26rqws", "text_27yzhc", "text_28nufr"],
+    ["text_29psbu", "text_30nxed", "text_31paum", "text_32suuq", "text_33tlbi", "text_34vrea"],
+    ["text_35myfl", "text_36mjrw", "text_37ipdu", "text_38rhty", "text_39qchc", "text_40poyn"],
+    ["text_41yphz", "text_42teqi", "text_43qwzs", "text_44wems", "text_45muob", "text_46spmw"],
+    ["text_47sfez", "text_48ctlt", "text_49opwc", "text_50gzcx", "text_51kecs", "text_52hywj"],
+    ["text_53cnj", "text_54bjjz", "text_55lwyr", "text_56omwm", "text_57ljqz", "text_58uuyd"],
+    ["text_59naey", "text_60zmdh", "text_61pyap", "text_62pskf", "text_63yrjo", "text_64pqpe"],
+    ["text_65bagf", "text_66hngt", "text_67hevm", "text_68fydv", "text_69jiuq", "text_70vxsw"],
+    ["text_71snzl", "text_72kceb", "text_73e", "text_74zwjd", "text_75limj", "text_76cgtx"],
+    ["text_83cab", "text_84cezg", "text_85kayc", "text_86twpd", "text_87rqvo"],
+    ["text_88uesl", "text_89ujab", "text_90cfno", "text_91zpdu", "text_92irca"],
+    ["text_93bevv", "text_94dvbv", "text_95nbih", "text_96svzl", "text_97dsdz"],
+    ["text_98cxwg", "text_99sdun", "text_100oibp", "text_101uaxu", "text_102vpos"],
   ];
 
-  // Ordenar miembros por 'orden'
-  const sorted = [...miembros].sort((a, b) => a.orden - b.orden);
+  const normalizarCargo = (cargo: string) =>
+    cargo
+      .toUpperCase()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .replace(/\s+/g, " ")
+      .trim();
+  const buscarCargo = (...cargos: string[]) => {
+    const buscados = cargos.map(normalizarCargo);
+    return miembros.find((m) => buscados.includes(normalizarCargo(m.cargo)));
+  };
 
-  sorted.forEach((m, idx) => {
-    if (idx < rowFieldNames.length) {
-      const fNames = rowFieldNames[idx];
-      trySet(fNames[0], m.cargo);
-      trySet(fNames[1], m.nombre);
-      trySet(fNames[2], m.dni);
-      trySet(fNames[3], m.domicilio);
-      trySet(fNames[4], m.localidad);
-      trySet(fNames[5], m.vencimiento);
+  // La plantilla reserva las últimas cuatro filas para los órganos de control.
+  // Se asignan posiciones fijas para que un cargo faltante no desplace a los
+  // siguientes y para que revisores y asesor queden siempre al final.
+  const cargosNomina: Array<{ fila: number; cargos: string[] }> = [
+    { fila: 0, cargos: ["PRESIDENTE"] },
+    { fila: 1, cargos: ["TESORERO", "TESORERIA"] },
+    { fila: 2, cargos: ["SECRETARIO", "SECRETARIA"] },
+    { fila: 3, cargos: ["VOCAL TITULAR 1°", "VOCAL TITULAR 1"] },
+    { fila: 4, cargos: ["VOCAL TITULAR 2°", "VOCAL TITULAR 2"] },
+    { fila: 5, cargos: ["VOCAL TITULAR 3°", "VOCAL TITULAR 3"] },
+    { fila: 6, cargos: ["VOCAL SUPLENTE 1°", "VOCAL SUPLENTE 1"] },
+    { fila: 7, cargos: ["VOCAL SUPLENTE 2°", "VOCAL SUPLENTE 2"] },
+    { fila: 12, cargos: ["REV. CTAS. TITULAR DOC.", "REV CTAS TITULAR DOC."] },
+    { fila: 13, cargos: ["REV. CTAS. TITULAR 1°", "REV CTAS TITULAR 1"] },
+    { fila: 14, cargos: ["REV. CTAS. SUPLENTE 1°", "REV CTAS SUPLENTE 1"] },
+    { fila: 15, cargos: ["ASESOR"] },
+  ];
+
+  cargosNomina.forEach(({ fila, cargos }) => {
+    const miembro = buscarCargo(...cargos);
+    if (!miembro) return;
+
+    const fNames = rowFieldNames[fila];
+    if (fila < 12) {
+      trySet(fNames[0], miembro.cargo);
+      trySet(fNames[1], miembro.nombre);
+      trySet(fNames[2], miembro.dni);
+      trySet(fNames[3], miembro.domicilio);
+      trySet(fNames[4], miembro.localidad);
+      trySet(fNames[5], formatearFechaDocumento(miembro.vencimiento));
+      return;
     }
+
+    trySet(fNames[0], miembro.nombre);
+    trySet(fNames[1], miembro.dni);
+    trySet(fNames[2], miembro.domicilio);
+    trySet(fNames[3], miembro.localidad);
+    trySet(fNames[4], formatearFechaDocumento(miembro.vencimiento));
   });
 
   return pdfDoc.save();
@@ -125,6 +153,12 @@ export interface DatosFinancierosPia {
   cajaChicaAprobada: number;
   /** Asociados activos del padrón */
   sociosActivos?: number;
+  actaNumero?: string;
+  actaFoja?: string;
+  actaFecha?: string;
+  actaSociosAsistentes?: number;
+  actaDecisiones?: string[];
+  actaCuotaPeriodicidad?: "Mensual" | "Anual";
 }
 
 export async function generarPdfPia(
@@ -194,6 +228,26 @@ export async function generarPdfPia(
   // Cuadro 2: Socios (honorarios y adherentes no se registran en el sistema: se completan en el PDF)
   if (financiero.sociosActivos !== undefined) trySet("activos", financiero.sociosActivos);
 
+  if (financiero.actaNumero) trySet("acta", financiero.actaNumero);
+  if (financiero.actaFoja) {
+    trySet("foja", financiero.actaFoja);
+    trySet("NRO FOJA", financiero.actaFoja);
+  }
+  if (financiero.actaSociosAsistentes !== undefined) trySet("asistieron", financiero.actaSociosAsistentes);
+  if (financiero.actaFecha) {
+    const partes = financiero.actaFecha.split("-");
+    if (partes.length === 3) {
+      trySet("dia", partes[2]);
+      trySet("mes", partes[1]);
+      trySet("año", partes[0]);
+    }
+  }
+  financiero.actaDecisiones?.slice(0, 5).forEach((decision, index) => {
+    trySet(`${index + 1}DECISIÓN ADOPTADA`, decision);
+  });
+  if (financiero.actaCuotaPeriodicidad === "Mensual") tryCheck("Check Box35");
+  if (financiero.actaCuotaPeriodicidad === "Anual") tryCheck("Check Box34");
+
   // Cuadros 3 y 4 (acta, foja, fecha y asistencia de la asamblea, decisiones adoptadas) salen
   // del libro de actas: quedan en blanco para completarlos en el PDF, que conserva sus campos editables
   if (financiero.cuotaSocialAprobada > 0) trySet("6", financiero.cuotaSocialAprobada);
@@ -229,7 +283,7 @@ export async function generarPdfPia(
       } else {
         trySet(`CUIL${idx + 14}`, m.cuil);
       }
-      trySet(`Texto${idx + 3}`, m.vencimiento || m.telefono);
+      trySet(`Texto${idx + 3}`, m.vencimiento ? formatearFechaDocumento(m.vencimiento) : m.telefono);
     }
   }
 

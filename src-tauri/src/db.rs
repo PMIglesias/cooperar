@@ -31,6 +31,34 @@ CREATE TABLE IF NOT EXISTS pagos(
 CREATE TABLE IF NOT EXISTS reuniones(
   id INTEGER PRIMARY KEY, fecha TEXT NOT NULL, tipo TEXT NOT NULL CHECK(tipo IN ('Comisión','Asamblea')),
   temas TEXT NOT NULL, acta TEXT, archivo_adjunto TEXT, registrado_por INTEGER REFERENCES usuarios(id));
+CREATE TABLE IF NOT EXISTS actas(
+  id INTEGER PRIMARY KEY,
+  reunion_id INTEGER REFERENCES reuniones(id) ON DELETE SET NULL,
+  tipo TEXT NOT NULL DEFAULT 'Asamblea Anual Ordinaria',
+  numero TEXT NOT NULL,
+  foja TEXT NOT NULL,
+  fecha_asamblea TEXT NOT NULL,
+  socios_activos_asistentes INTEGER NOT NULL DEFAULT 0,
+  periodo_desde TEXT NOT NULL,
+  periodo_hasta TEXT NOT NULL,
+  cuota_social INTEGER NOT NULL DEFAULT 0,
+  cuota_periodicidad TEXT NOT NULL DEFAULT 'Mensual',
+  caja_chica INTEGER NOT NULL DEFAULT 0,
+  cuadro_financiero TEXT NOT NULL DEFAULT '{}',
+  observaciones TEXT NOT NULL DEFAULT '',
+  archivo_adjunto TEXT,
+  estado TEXT NOT NULL DEFAULT 'Borrador' CHECK(estado IN ('Borrador','Firmada')),
+  registrado_por INTEGER REFERENCES usuarios(id)
+);
+CREATE TABLE IF NOT EXISTS acta_decisiones(
+  id INTEGER PRIMARY KEY,
+  acta_id INTEGER NOT NULL REFERENCES actas(id) ON DELETE CASCADE,
+  orden INTEGER NOT NULL,
+  descripcion TEXT NOT NULL,
+  resultado TEXT NOT NULL CHECK(resultado IN ('APROBADO','DESAPROBADO')),
+  observacion TEXT NOT NULL DEFAULT '',
+  UNIQUE(acta_id, orden)
+);
 CREATE TABLE IF NOT EXISTS asistencias(
   reunion_id INTEGER NOT NULL REFERENCES reuniones(id) ON DELETE CASCADE,
   asociado_id INTEGER NOT NULL REFERENCES asociados(id), PRIMARY KEY(reunion_id, asociado_id));
@@ -129,6 +157,8 @@ pub fn init(dir: &Path) -> Result<Connection, Box<dyn std::error::Error>> {
     let _ = conn.execute("ALTER TABLE movimientos_caja ADD COLUMN registrado_por INTEGER REFERENCES usuarios(id)", []);
     let _ = conn.execute("ALTER TABLE movimientos_caja ADD COLUMN registrado_en TEXT", []);
     let _ = conn.execute("ALTER TABLE reuniones ADD COLUMN registrado_por INTEGER REFERENCES usuarios(id)", []);
+    let _ = conn.execute("ALTER TABLE actas ADD COLUMN archivo_adjunto TEXT", []);
+    let _ = conn.execute("ALTER TABLE actas ADD COLUMN cuadro_financiero TEXT NOT NULL DEFAULT '{}'", []);
     let _ = conn.execute("ALTER TABLE comision_directiva ADD COLUMN asociado_id INTEGER REFERENCES asociados(id) ON DELETE SET NULL", []);
     let _ = conn.execute("ALTER TABLE comision_directiva ADD COLUMN personal_establecimiento_id INTEGER REFERENCES personal_establecimiento(id) ON DELETE SET NULL", []);
     let _ = conn.execute("ALTER TABLE asociados ADD COLUMN tipo_vinculo TEXT NOT NULL DEFAULT 'PADRE_TUTOR'", []);

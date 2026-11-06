@@ -8,6 +8,7 @@ import Asociados from "./pages/Asociados";
 import Cuotas from "./pages/Cuotas";
 import Caja from "./pages/Caja";
 import Reuniones from "./pages/Reuniones";
+import Actas from "./pages/Actas";
 import Rendiciones from "./pages/Rendiciones";
 import Documentacion from "./pages/Documentacion";
 import ComisionDirectiva from "./pages/ComisionDirectiva";
@@ -52,6 +53,7 @@ export default function App() {
   else if (route === "cuotas") page = <Cuotas />;
   else if (route === "caja") page = <Caja />;
   else if (route === "reuniones") page = <Reuniones />;
+  else if (route === "actas") page = <Actas />;
   else if (route === "rendiciones") page = <Rendiciones />;
   else if (route === "documentacion") page = <Documentacion />;
   else if (route === "comision") page = <ComisionDirectiva />;

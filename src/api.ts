@@ -149,6 +149,103 @@ export interface DatosReunion {
   temas: string;
 }
 
+export interface DecisionActa {
+  orden: number;
+  descripcion: string;
+  resultado: "APROBADO" | "DESAPROBADO";
+  observacion: string;
+}
+
+export interface CuadroFinancieroActa {
+  cuotaSocial: string;
+  donacionDinero: string;
+  rifas: string;
+  festivales: string;
+  kiosco: string;
+  interesesBancarios: string;
+  reintegradosBanco: string;
+  subsidiosDgcye: string;
+  otrosIngresosA: string;
+  otrosIngresosB: string;
+  totalEntradas: string;
+  resumenTotalEntradas: string;
+  saldoEjercicioAnterior: string;
+  totalGeneral: string;
+  totalSalidasResumen: string;
+  saldoProximoEjercicio: string;
+  cuentaCorriente: string;
+  plazoFijoBanco: string;
+  dineroEfectivo: string;
+  ropaCalzado: string;
+  librosUtiles: string;
+  excursiones: string;
+  emergenciasSanitarias: string;
+  golosinasPremiosMedallas: string;
+  gastosAlumnoF: string;
+  gastosAlumnoG: string;
+  materialDidactico: string;
+  mantSubsidios: string;
+  mantFondosPropios: string;
+  articulosLimpieza: string;
+  combustibleCalefaccion: string;
+  libreria: string;
+  mobiliario: string;
+  gastosEscuelaH: string;
+  gastosEscuelaI: string;
+  organizacionRifas: string;
+  organizacionFestivales: string;
+  kioscoEntidad: string;
+  gastosEntidadD: string;
+  gastosEntidadE: string;
+  gastosAdministrativos: string;
+  otrosEgresos: string;
+  totalSalidasPlazoFijo: string;
+  poseeKiosco: boolean;
+  kioscoPropio: boolean;
+  kioscoLicitado: boolean;
+  contratoDesde: string;
+  contratoHasta: string;
+}
+
+export interface ActaFila {
+  id: number;
+  reunionId: number | null;
+  tipo: string;
+  numero: string;
+  foja: string;
+  fechaAsamblea: string;
+  sociosActivosAsistentes: number;
+  periodoDesde: string;
+  periodoHasta: string;
+  cuotaSocial: number;
+  cuotaPeriodicidad: "Mensual" | "Anual";
+  cajaChica: number;
+  cuadroFinanciero: CuadroFinancieroActa;
+  observaciones?: string;
+  archivoAdjunto: string | null;
+  estado: "Borrador" | "Firmada";
+  decisiones: DecisionActa[];
+}
+
+export interface DatosActa {
+  id?: number;
+  reunionId?: number | null;
+  tipo: string;
+  numero: string;
+  foja: string;
+  fechaAsamblea: string;
+  sociosActivosAsistentes: number;
+  periodoDesde: string;
+  periodoHasta: string;
+  cuotaSocial: number;
+  cuotaPeriodicidad: "Mensual" | "Anual";
+  cajaChica: number;
+  cuadroFinanciero: CuadroFinancieroActa;
+  observaciones?: string;
+  archivoAdjunto?: string | null;
+  decisiones: DecisionActa[];
+}
+
 // Rendiciones
 export interface RendicionFila {
   id: number;
@@ -662,6 +759,21 @@ export const api = {
       r.acta = acta;
       if (archivoAdjunto !== undefined) r.archivoAdjunto = archivoAdjunto;
     }
+  },
+  listarActas: async (): Promise<ActaFila[]> => {
+    if (isTauri) return invoke<ActaFila[]>("listar_actas");
+    return [];
+  },
+  guardarActaDetallada: async (datos: DatosActa): Promise<ActaFila> => {
+    if (isTauri) return invoke<ActaFila>("guardar_acta_detallada", { datos });
+    const ahora: ActaFila = {
+      ...datos,
+      id: datos.id || Date.now(),
+      reunionId: datos.reunionId ?? null,
+      archivoAdjunto: datos.archivoAdjunto ?? null,
+      estado: "Borrador",
+    };
+    return ahora;
   },
 
   // Rendiciones

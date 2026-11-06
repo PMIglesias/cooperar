@@ -14,6 +14,7 @@ import {
   MiembroComisionFila,
   DatosInstitucionales,
   AsociadoFila,
+  ActaFila,
   ejercicioDe,
   anioEjercicioActual,
 } from "../api";
@@ -37,6 +38,7 @@ export default function Documentacion() {
   const [vista, setVista] = useState<Vista>("listado");
   const [documentos, setDocumentos] = useState<DocumentoAsambleaFila[]>([]);
   const [comision, setComision] = useState<MiembroComisionFila[]>([]);
+  const [actas, setActas] = useState<ActaFila[]>([]);
   const [institucion, setInstitucion] = useState<DatosInstitucionales | null>(null);
   const [loading, setLoading] = useState(true);
   const [generando, setGenerando] = useState(false);
@@ -59,14 +61,16 @@ export default function Documentacion() {
   const cargarDatos = async () => {
     try {
       setLoading(true);
-      const [docs, com, inst] = await Promise.all([
+      const [docs, com, inst, actasRegistradas] = await Promise.all([
         api.listarDocumentosAsambleas(),
         api.listarComisionDirectiva(),
         api.obtenerDatosInstitucionales(),
+        api.listarActas(),
       ]);
       setDocumentos(docs);
       setComision(com);
       setInstitucion(inst);
+      setActas(actasRegistradas);
     } catch (err: any) {
       setError(err?.message || "Error al cargar datos");
     } finally {
@@ -200,6 +204,51 @@ export default function Documentacion() {
         cajaChicaAprobada: 0,
         sociosActivos: padron.activos,
       };
+      const acta = actas
+        .filter((item) => item.tipo === "Asamblea Anual Ordinaria")
+        .filter((item) => item.periodoDesde === String(anioInicio) && item.periodoHasta === String(anioActual))
+        .sort((a, b) => b.fechaAsamblea.localeCompare(a.fechaAsamblea))[0];
+      if (acta) {
+        const montoActa = (valor: string | undefined) => valor ? Number(valor) || 0 : 0;
+        const cuadro = acta.cuadroFinanciero;
+        financiero.actaNumero = acta.numero;
+        financiero.actaFoja = acta.foja;
+        financiero.actaFecha = acta.fechaAsamblea;
+        financiero.actaSociosAsistentes = acta.sociosActivosAsistentes;
+        financiero.actaDecisiones = acta.decisiones
+          .sort((a, b) => a.orden - b.orden)
+          .map((decision) => decision.observacion.trim() || decision.resultado);
+        financiero.actaCuotaPeriodicidad = acta.cuotaPeriodicidad;
+        financiero.cuotaSocialAprobada = acta.cuotaSocial;
+        financiero.cajaChicaAprobada = acta.cajaChica;
+        financiero.totalCuotas = montoActa(cuadro.cuotaSocial) || financiero.totalCuotas;
+        financiero.totalDonaciones = montoActa(cuadro.donacionDinero) || financiero.totalDonaciones;
+        financiero.totalRifas = montoActa(cuadro.rifas) || financiero.totalRifas;
+        financiero.totalFestivales = montoActa(cuadro.festivales) || financiero.totalFestivales;
+        financiero.totalKiosco = montoActa(cuadro.kiosco) || financiero.totalKiosco;
+        financiero.intereses = montoActa(cuadro.interesesBancarios) || financiero.intereses;
+        financiero.reintegrados = montoActa(cuadro.reintegradosBanco) || financiero.reintegrados;
+        financiero.subsidios = montoActa(cuadro.subsidiosDgcye) || financiero.subsidios;
+        financiero.otrosIngresosA = montoActa(cuadro.otrosIngresosA) || financiero.otrosIngresosA;
+        financiero.otrosIngresosB = montoActa(cuadro.otrosIngresosB) || financiero.otrosIngresosB;
+        financiero.ropaCalzado = montoActa(cuadro.ropaCalzado) || financiero.ropaCalzado;
+        financiero.librosUtiles = montoActa(cuadro.librosUtiles) || financiero.librosUtiles;
+        financiero.excursiones = montoActa(cuadro.excursiones) || financiero.excursiones;
+        financiero.emergencias = montoActa(cuadro.emergenciasSanitarias) || financiero.emergencias;
+        financiero.golosinasPremios = montoActa(cuadro.golosinasPremiosMedallas) || financiero.golosinasPremios;
+        financiero.materialDidactico = montoActa(cuadro.materialDidactico) || financiero.materialDidactico;
+        financiero.mantSubsidios = montoActa(cuadro.mantSubsidios) || financiero.mantSubsidios;
+        financiero.mantFondosPropios = montoActa(cuadro.mantFondosPropios) || financiero.mantFondosPropios;
+        financiero.limpieza = montoActa(cuadro.articulosLimpieza) || financiero.limpieza;
+        financiero.combustible = montoActa(cuadro.combustibleCalefaccion) || financiero.combustible;
+        financiero.libreria = montoActa(cuadro.libreria) || financiero.libreria;
+        financiero.mobiliario = montoActa(cuadro.mobiliario) || financiero.mobiliario;
+        financiero.organizacionRifas = montoActa(cuadro.organizacionRifas) || financiero.organizacionRifas;
+        financiero.organizacionFestivales = montoActa(cuadro.organizacionFestivales) || financiero.organizacionFestivales;
+        financiero.gastosKiosco = montoActa(cuadro.kioscoEntidad) || financiero.gastosKiosco;
+        financiero.otrosGastosA = montoActa(cuadro.gastosAdministrativos) || financiero.otrosGastosA;
+        financiero.otrosGastosB = montoActa(cuadro.otrosEgresos) || financiero.otrosGastosB;
+      }
 
       const pdfBytes = await generarPdfPia(institucion, comision, financiero, ejercicioActual);
       const pdfBase64 = uint8ArrayToBase64(pdfBytes);
@@ -296,6 +345,12 @@ export default function Documentacion() {
                   otrosGastosB: datos.otrosGastosB ?? 7000,
                   cuotaSocialAprobada: datos.cuotaSocialAprobada ?? 8000,
                   cajaChicaAprobada: datos.cajaChicaAprobada ?? 40000,
+                  actaNumero: datos.actaNumero,
+                  actaFoja: datos.actaFoja,
+                  actaFecha: datos.actaFecha,
+                  actaSociosAsistentes: datos.actaSociosAsistentes,
+                  actaDecisiones: datos.actaDecisiones,
+                  actaCuotaPeriodicidad: datos.actaCuotaPeriodicidad,
                 },
                 datos.ejercicio || doc.periodo
               );

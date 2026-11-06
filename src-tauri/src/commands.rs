@@ -76,7 +76,7 @@ fn auditar(db: &Connection, usuario_id: i64, accion: &str, entidad: &str, entida
     Ok(())
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AuditoriaFila {
     pub id: i64,
@@ -804,6 +804,143 @@ pub fn guardar_acta(st: State<AppState>, id: i64, acta: String, archivo_adjunto:
         params![acta.trim(), archivo_adjunto, id],
     ).map_err(s)?;
     Ok(())
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DecisionActa {
+    pub orden: i64,
+    pub descripcion: String,
+    pub resultado: String,
+    pub observacion: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ActaFila {
+    pub id: i64,
+    pub reunion_id: Option<i64>,
+    pub tipo: String,
+    pub numero: String,
+    pub foja: String,
+    pub fecha_asamblea: String,
+    pub socios_activos_asistentes: i64,
+    pub periodo_desde: String,
+    pub periodo_hasta: String,
+    pub cuota_social: i64,
+    pub cuota_periodicidad: String,
+    pub caja_chica: i64,
+    pub cuadro_financiero: serde_json::Value,
+    pub observaciones: String,
+    pub archivo_adjunto: Option<String>,
+    pub estado: String,
+    pub decisiones: Vec<DecisionActa>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GuardarActaDetallada {
+    pub id: Option<i64>,
+    pub reunion_id: Option<i64>,
+    pub tipo: String,
+    pub numero: String,
+    pub foja: String,
+    pub fecha_asamblea: String,
+    pub socios_activos_asistentes: i64,
+    pub periodo_desde: String,
+    pub periodo_hasta: String,
+    pub cuota_social: i64,
+    pub cuota_periodicidad: String,
+    pub caja_chica: i64,
+    #[serde(default)]
+    pub cuadro_financiero: serde_json::Value,
+    pub observaciones: String,
+    pub archivo_adjunto: Option<String>,
+    pub decisiones: Vec<DecisionActa>,
+}
+
+#[tauri::command]
+pub fn listar_actas(st: State<AppState>) -> R<Vec<ActaFila>> {
+    auth(&st)?;
+    let db = st.db.lock().map_err(s)?;
+    let mut stmt = db.prepare(
+        "SELECT id, reunion_id, tipo, numero, foja, fecha_asamblea, socios_activos_asistentes,
+                periodo_desde, periodo_hasta, cuota_social, cuota_periodicidad, caja_chica, cuadro_financiero,
+                observaciones, archivo_adjunto, estado
+         FROM actas ORDER BY fecha_asamblea DESC, id DESC",
+    ).map_err(s)?;
+    let rows = stmt.query_map([], |r| {
+        Ok((
+            r.get::<_, i64>(0)?, r.get::<_, Option<i64>>(1)?, r.get::<_, String>(2)?,
+            r.get::<_, String>(3)?, r.get::<_, String>(4)?, r.get::<_, String>(5)?,
+            r.get::<_, i64>(6)?, r.get::<_, String>(7)?, r.get::<_, String>(8)?,
+            r.get::<_, i64>(9)?, r.get::<_, String>(10)?, r.get::<_, i64>(11)?,
+            r.get::<_, String>(12)?, r.get::<_, String>(13)?, r.get::<_, Option<String>>(14)?, r.get::<_, String>(15)?,
+        ))
+    }).map_err(s)?;
+    let mut result = Vec::new();
+    for row in rows {
+        let (id, reunion_id, tipo, numero, foja, fecha_asamblea, socios, desde, hasta, cuota, periodicidad, caja, cuadro_financiero, observaciones, archivo, estado) = row.map_err(s)?;
+        let mut decisions = db.prepare(
+            "SELECT orden, descripcion, resultado, observacion FROM acta_decisiones WHERE acta_id=?1 ORDER BY orden",
+        ).map_err(s)?;
+        let decisions = decisions.query_map(params![id], |r| Ok(DecisionActa {
+            orden: r.get(0)?, descripcion: r.get(1)?, resultado: r.get(2)?, observacion: r.get(3)?,
+        })).map_err(s)?.collect::<Result<Vec<_>, _>>().map_err(s)?;
+        result.push(ActaFila {
+            id, reunion_id, tipo, numero, foja, fecha_asamblea,
+            socios_activos_asistentes: socios, periodo_desde: desde, periodo_hasta: hasta,
+            cuota_social: cuota, cuota_periodicidad: periodicidad, caja_chica: caja,
+            cuadro_financiero: serde_json::from_str(&cuadro_financiero).unwrap_or_else(|_| serde_json::json!({})),
+            observaciones, archivo_adjunto: archivo, estado, decisiones: decisions,
+        });
+    }
+    Ok(result)
+}
+
+#[tauri::command]
+pub fn guardar_acta_detallada(st: State<AppState>, datos: GuardarActaDetallada) -> R<ActaFila> {
+    let u = auth_secretaria_presidente_o_admin(&st)?;
+    let db = st.db.lock().map_err(s)?;
+    let tx = db.unchecked_transaction().map_err(s)?;
+    let id = if let Some(id) = datos.id {
+        tx.execute(
+            "UPDATE actas SET reunion_id=?1,tipo=?2,numero=?3,foja=?4,fecha_asamblea=?5,
+             socios_activos_asistentes=?6,periodo_desde=?7,periodo_hasta=?8,cuota_social=?9,
+             cuota_periodicidad=?10,caja_chica=?11,cuadro_financiero=?12,observaciones=?13,archivo_adjunto=?14
+             WHERE id=?15",
+            params![datos.reunion_id, datos.tipo.trim(), datos.numero.trim(), datos.foja.trim(), datos.fecha_asamblea,
+                    datos.socios_activos_asistentes, datos.periodo_desde, datos.periodo_hasta,
+                    datos.cuota_social, datos.cuota_periodicidad, datos.caja_chica,
+                    serde_json::to_string(&datos.cuadro_financiero).map_err(s)?,
+                    datos.observaciones.trim(), datos.archivo_adjunto, id],
+        ).map_err(s)?;
+        tx.execute("DELETE FROM acta_decisiones WHERE acta_id=?1", params![id]).map_err(s)?;
+        id
+    } else {
+        tx.execute(
+            "INSERT INTO actas(reunion_id,tipo,numero,foja,fecha_asamblea,socios_activos_asistentes,
+             periodo_desde,periodo_hasta,cuota_social,cuota_periodicidad,caja_chica,cuadro_financiero,observaciones,
+             archivo_adjunto,registrado_por)
+             VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15)",
+            params![datos.reunion_id, datos.tipo.trim(), datos.numero.trim(), datos.foja.trim(), datos.fecha_asamblea,
+                    datos.socios_activos_asistentes, datos.periodo_desde, datos.periodo_hasta, datos.cuota_social,
+                    datos.cuota_periodicidad, datos.caja_chica,
+                    serde_json::to_string(&datos.cuadro_financiero).map_err(s)?,
+                    datos.observaciones.trim(), datos.archivo_adjunto, u.id],
+        ).map_err(s)?;
+        tx.last_insert_rowid()
+    };
+    for decision in &datos.decisiones {
+        tx.execute(
+            "INSERT INTO acta_decisiones(acta_id,orden,descripcion,resultado,observacion) VALUES(?1,?2,?3,?4,?5)",
+            params![id, decision.orden, decision.descripcion.trim(), decision.resultado, decision.observacion.trim()],
+        ).map_err(s)?;
+    }
+    tx.commit().map_err(s)?;
+    auditar(&db, u.id, "GUARDAR", "acta", Some(id))?;
+    drop(db);
+    listar_actas(st).and_then(|items| items.into_iter().find(|a| a.id == id).ok_or_else(|| "No se pudo recuperar el acta guardada".to_string()))
 }
 
 // ----------------------------------------------------

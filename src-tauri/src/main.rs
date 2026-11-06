@@ -82,6 +82,8 @@ fn main() {
             commands::listar_reuniones,
             commands::crear_reunion,
             commands::guardar_acta,
+            commands::listar_actas,
+            commands::guardar_acta_detallada,
             commands::listar_rendiciones,
             commands::detalle_rendicion,
             commands::detalle_mensual_rendicion,
