@@ -144,7 +144,7 @@ export default function Actas() {
     <Layout
       title={form ? "Actas" : "Actas de asamblea"}
       headerMessage={form && error ? (
-        <span style={{ color: "var(--color-danger)", fontSize: "var(--fs-sm)", marginRight: "auto" }}>{error}</span>
+        <span style={{ color: "var(--color-danger)", fontSize: "var(--fs-sm)", textAlign: "right", marginLeft: "auto", marginRight: "var(--space-4)" }}>{error}</span>
       ) : undefined}
       action={form ? (
         <div style={{ display: "flex", gap: "var(--space-3)", alignItems: "center" }}>
@@ -315,7 +315,15 @@ export default function Actas() {
             <DineroInput label="Dinero en efectivo" value={form.cuadroFinanciero.dineroEfectivo} onChange={(v) => actualizarCuadro("dineroEfectivo", v)} />
           </div>
 
-          <TextoInput label="Observaciones" value={form.observaciones || ""} onChange={(v) => actualizar("observaciones", v)} />
+          <label style={{ display: "flex", flexDirection: "column", gap: "var(--space-2)", marginTop: "var(--space-2)" }}>
+            <span className={fieldStyles.label}>Observaciones</span>
+            <textarea
+              className={fieldStyles.control}
+              style={{ width: "100%", minHeight: 120, resize: "vertical", padding: "var(--space-3) 14px" }}
+              value={form.observaciones || ""}
+              onChange={(e) => actualizar("observaciones", e.target.value)}
+            />
+          </label>
 
           <h4 style={{ margin: "var(--space-3) 0 var(--space-2)" }}>Salidas</h4>
           <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: "var(--space-1)" }}>
