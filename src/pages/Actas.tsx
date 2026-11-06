@@ -141,17 +141,19 @@ export default function Actas() {
   };
 
   return (
-    <Layout title="Actas">
-      {!form && error && <div style={{ color: "var(--color-danger)", marginBottom: "var(--space-4)" }}>{error}</div>}
+    <Layout
+      title={form ? "Actas" : "Actas de asamblea"}
+      action={form ? (
+        <div style={{ display: "flex", gap: "var(--space-3)", alignItems: "center" }}>
+          <Button onClick={guardar} disabled={guardando}>{guardando ? "Guardando..." : "Guardar acta"}</Button>
+          <Button variant="secondary" onClick={() => setForm(null)}>Cancelar</Button>
+        </div>
+      ) : <Button onClick={() => editar()}>+ Nueva acta</Button>}
+    >
+      {error && <div style={{ color: "var(--color-danger)", marginBottom: "var(--space-4)", textAlign: "left", fontSize: "var(--fs-sm)" }}>{error}</div>}
       {!form ? (
         <>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "var(--space-5)" }}>
-            <div>
-              <h2 style={{ margin: 0 }}>Actas de asamblea</h2>
-              <p>Datos estructurados que se vincularán automáticamente con el P.I.A.</p>
-            </div>
-            <Button onClick={() => editar()}>+ Nueva acta</Button>
-          </div>
+          <p>Datos estructurados que se vincularán automáticamente con el P.I.A.</p>
           <Card>
             {actas.length === 0 ? <p>No hay actas registradas.</p> : actas.map((acta) => (
               <div key={acta.id} style={{ display: "flex", justifyContent: "space-between", gap: "var(--space-4)", padding: "var(--space-4) 0", borderBottom: "1px solid var(--color-border)" }}>
@@ -167,11 +169,6 @@ export default function Actas() {
         </>
       ) : (
         <Card title="Síntesis del acta de la Asamblea Anual Ordinaria">
-          <div style={{ position: "sticky", top: 0, zIndex: 2, display: "flex", gap: "var(--space-3)", alignItems: "center", flexWrap: "wrap", margin: "calc(-1 * var(--space-5)) calc(-1 * var(--space-5)) var(--space-4)", padding: "var(--space-3) var(--space-5)", background: "var(--color-surface)", borderBottom: "1px solid var(--color-border)" }}>
-            <Button onClick={guardar} disabled={guardando}>{guardando ? "Guardando..." : "Guardar acta"}</Button>
-            <Button variant="secondary" onClick={() => setForm(null)}>Cancelar</Button>
-            {error && <span style={{ color: "var(--color-danger)", fontSize: "var(--fs-sm)" }}>{error}</span>}
-          </div>
           <div style={{ display: "flex", gap: "var(--space-3)", alignItems: "center", marginBottom: "var(--space-3)", flexWrap: "nowrap" }}>
             <label style={{ display: "inline-flex", gap: "var(--space-2)", alignItems: "center", whiteSpace: "nowrap" }}>
               <span className={fieldStyles.label}>Ejercicio desde</span>
