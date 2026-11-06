@@ -7,6 +7,7 @@ import s from "./Layout.module.css";
 interface Props {
   title: string;
   action?: ReactNode;
+  headerMessage?: ReactNode;
   headerExtra?: ReactNode;
   flushContentTop?: boolean;
   hideContentOverflow?: boolean;
@@ -17,6 +18,7 @@ interface Props {
 export default function Layout({
   title,
   action,
+  headerMessage,
   headerExtra,
   flushContentTop = false,
   hideContentOverflow = false,
@@ -31,6 +33,7 @@ export default function Layout({
       <div className={s.main}>
         <header className={s.header}>
           <h1 className={s.title}>{title}</h1>
+          {headerMessage}
           {action || headerExtra}
         </header>
         <main className={`${s.content} ${flushContentTop ? s.contentFlushTop : ""} ${hideContentOverflow ? s.contentNoOverflow : ""}`}>{children}</main>

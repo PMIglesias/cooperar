@@ -143,6 +143,9 @@ export default function Actas() {
   return (
     <Layout
       title={form ? "Actas" : "Actas de asamblea"}
+      headerMessage={form && error ? (
+        <span style={{ color: "var(--color-danger)", fontSize: "var(--fs-sm)", marginRight: "auto" }}>{error}</span>
+      ) : undefined}
       action={form ? (
         <div style={{ display: "flex", gap: "var(--space-3)", alignItems: "center" }}>
           <Button onClick={guardar} disabled={guardando}>{guardando ? "Guardando..." : "Guardar acta"}</Button>
@@ -150,7 +153,6 @@ export default function Actas() {
         </div>
       ) : <Button onClick={() => editar()}>+ Nueva acta</Button>}
     >
-      {error && <div style={{ color: "var(--color-danger)", marginBottom: "var(--space-4)", textAlign: "left", fontSize: "var(--fs-sm)" }}>{error}</div>}
       {!form ? (
         <>
           <p>Datos estructurados que se vincularán automáticamente con el P.I.A.</p>
