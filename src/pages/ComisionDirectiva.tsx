@@ -30,6 +30,8 @@ export default function ComisionDirectiva() {
   const [loading, setLoading] = useState(true);
   const [savingInst, setSavingInst] = useState(false);
   const [mensajeExito, setMensajeExito] = useState<string | null>(null);
+  /** Confirmación de guardado que se muestra junto al botón, no en el encabezado */
+  const [mensajeGuardado, setMensajeGuardado] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   // Modal para editar integrante de Comisión
@@ -49,6 +51,8 @@ export default function ComisionDirectiva() {
   const imgRef = useRef<HTMLImageElement>(null);
 
   const puedeEditar = usuario.rol === "Secretaria" || usuario.rol === "Superadmin";
+  /** Los saldos en banco los maneja la Tesorería (y el Superadmin) */
+  const puedeEditarSaldos = usuario.rol === "Tesorero" || usuario.rol === "Superadmin";
   const [columnasAutoridades, setColumnasAutoridades] = useState({
     dni: true,
     cuil: true,
@@ -81,7 +85,7 @@ export default function ComisionDirectiva() {
         api.listarComisionDirectiva(),
         api.listarPersonalEstablecimiento(),
         api.obtenerDatosInstitucionales(),
-        api.listarAsociados({ busqueda: "", estadoCuotas: "Todos", estado: "Activos" }),
+        api.listarAsociados({ busqueda: "", estadoColaboracion: "Todos", estado: "Activos" }),
       ]);
       setComision(com);
       setPersonal(pers);
@@ -97,6 +101,13 @@ export default function ComisionDirectiva() {
   useEffect(() => {
     cargarDatos();
   }, []);
+
+  // La confirmación de guardado se desvanece sola a los pocos segundos
+  useEffect(() => {
+    if (!mensajeGuardado) return;
+    const temporizador = setTimeout(() => setMensajeGuardado(null), 4000);
+    return () => clearTimeout(temporizador);
+  }, [mensajeGuardado]);
 
   useEffect(() => {
     containerRef.current?.parentElement?.scrollTo({ top: 0 });
@@ -315,16 +326,26 @@ export default function ComisionDirectiva() {
 
   const handleGuardarInstitucion = async (e: FormEvent) => {
     e.preventDefault();
-    if (!institucion || !puedeEditar) return;
+    if (!institucion || (!puedeEditar && !puedeEditarSaldos)) return;
     try {
       setSavingInst(true);
       setError(null);
-      await api.guardarDatosInstitucionales(institucion);
-      if (institucion.logoBase64 !== undefined) {
-        setLogoCooperadora(institucion.logoBase64);
+      setMensajeGuardado(null);
+      if (puedeEditar) {
+        await api.guardarDatosInstitucionales(institucion);
+        if (institucion.logoBase64 !== undefined) {
+          setLogoCooperadora(institucion.logoBase64);
+        }
+      } else {
+        // Tesorería: sólo se envían los saldos en banco, el resto es de lectura
+        await api.guardarConfiguracion("saldo_cuenta_corriente", institucion.saldoCuentaCorriente);
+        await api.guardarConfiguracion("saldo_plazo_fijo", institucion.saldoPlazoFijo);
       }
-      setMensajeExito("Datos guardados correctamente.");
+      // La confirmación se muestra al lado del botón de guardar, no en el encabezado
+      setMensajeExito(null);
+      setMensajeGuardado("Datos guardados correctamente.");
     } catch (err: any) {
+      setMensajeGuardado(null);
       setError(err?.message || "Error al guardar datos institucionales");
     } finally {
       setSavingInst(false);
@@ -616,6 +637,7 @@ export default function ComisionDirectiva() {
             onClick={() => {
               setActiveTab("autoridades");
               setMensajeExito(null);
+              setMensajeGuardado(null);
             }}
           >
             👥 Nómina de Autoridades
@@ -626,6 +648,7 @@ export default function ComisionDirectiva() {
             onClick={() => {
               setActiveTab("establecimiento");
               setMensajeExito(null);
+              setMensajeGuardado(null);
             }}
           >
             🏫 Establecimiento Educativo
@@ -636,6 +659,7 @@ export default function ComisionDirectiva() {
             onClick={() => {
               setActiveTab("cooperadora");
               setMensajeExito(null);
+              setMensajeGuardado(null);
             }}
           >
             🏛️ Asociación Cooperadora
@@ -775,6 +799,7 @@ export default function ComisionDirectiva() {
                     <Button type="submit" disabled={savingInst}>
                       {savingInst ? "Guardando..." : "Guardar Datos del Establecimiento"}
                     </Button>
+                    {mensajeGuardado && <span className={s.savedMsg}>✓ {mensajeGuardado}</span>}
                   </div>
                 )}
               </Card>
@@ -959,45 +984,118 @@ export default function ComisionDirectiva() {
               </Card>
             </div>
 
-            <div style={{ marginTop: "var(--space-6)" }}>
-              <Card title="Valores Oficiales de Cuota Social">
+            {/* En Banco y Caja Chica comparten fila: ambos son montos fijados en asamblea */}
+            <div className={s.configTwoCols} style={{ marginTop: "var(--space-6)" }}>
+              <Card title="En Banco">
                 <div className={s.configGrid}>
                   <Field
-                    label="Valor Cuota Social Mensual ($)"
+                    label="Cuenta Corriente ($)"
+                    type="text"
+                    inputMode="numeric"
+                    width={220}
+                    disabled={!puedeEditarSaldos}
+                    value={institucion.saldoCuentaCorriente}
+                    onChange={(e) =>
+                      setInstitucion({ ...institucion, saldoCuentaCorriente: e.target.value.replace(/\D/g, "") })
+                    }
+                  />
+                  <Field
+                    label="Plazo Fijo ($)"
+                    type="text"
+                    inputMode="numeric"
+                    width={220}
+                    disabled={!puedeEditarSaldos}
+                    value={institucion.saldoPlazoFijo}
+                    onChange={(e) =>
+                      setInstitucion({ ...institucion, saldoPlazoFijo: e.target.value.replace(/\D/g, "") })
+                    }
+                  />
+                </div>
+                <span style={{ fontSize: "var(--fs-xs)", color: "var(--color-text-muted)", display: "block", marginTop: "var(--space-2)" }}>
+                  💡 Estos saldos se precargan al crear el acta de asamblea (En banco — cuenta corriente y plazo fijo).
+                  El acta, a su vez, alimenta el saldo inicial en banco de la Planilla de Información Anual (P.I.A.).
+                </span>
+              </Card>
+
+              <Card title="Caja Chica">
+                <div className={s.configGrid}>
+                  <Field
+                    label="Monto aprobado ($)"
+                    type="text"
+                    inputMode="numeric"
+                    width={220}
+                    disabled={!puedeEditar}
+                    value={institucion.cajaChica}
+                    onChange={(e) =>
+                      setInstitucion({ ...institucion, cajaChica: e.target.value.replace(/\D/g, "") })
+                    }
+                  />
+                </div>
+                <span style={{ fontSize: "var(--fs-xs)", color: "var(--color-text-muted)", display: "block", marginTop: "var(--space-2)" }}>
+                  💡 Se completa con el monto fijado en el punto 7° del acta de asamblea al aprobarla.
+                </span>
+              </Card>
+            </div>
+
+            <div style={{ marginTop: "var(--space-6)" }}>
+              <Card title="Valores del Bono Contribución (Cuota Social)">
+                <div className={s.configGrid}>
+                  <Field
+                    label="Bono contribución Anual ($)"
                     type="number"
                     min="0"
                     step="100"
                     disabled={!puedeEditar}
-                    value={institucion.cuotaMensual}
+                    value={institucion.bonoAnual}
                     onChange={(e) =>
-                      setInstitucion({ ...institucion, cuotaMensual: e.target.value })
+                      setInstitucion({ ...institucion, bonoAnual: e.target.value })
                     }
                     required
                   />
                   <Field
-                    label="Valor Cuota Social Anual ($)"
+                    label="Bono contribución Materiales Alumnos ($)"
                     type="number"
                     min="0"
                     step="100"
                     disabled={!puedeEditar}
-                    value={institucion.cuotaAnual}
+                    value={institucion.materiales}
                     onChange={(e) =>
-                      setInstitucion({ ...institucion, cuotaAnual: e.target.value })
+                      setInstitucion({ ...institucion, materiales: e.target.value })
+                    }
+                    required
+                  />
+                  <Field
+                    label="Bono contribución Materiales Hermanos ($)"
+                    type="number"
+                    min="0"
+                    step="100"
+                    disabled={!puedeEditar}
+                    value={institucion.materialesHermanos}
+                    onChange={(e) =>
+                      setInstitucion({ ...institucion, materialesHermanos: e.target.value })
                     }
                     required
                   />
                 </div>
                 <span style={{ fontSize: "var(--fs-xs)", color: "var(--color-text-muted)", display: "block", marginTop: "var(--space-2)" }}>
-                  💡 Este valor es el arancel societario oficial fijado en Asamblea. Se utilizará como sugerido por defecto en los registros de pago y en la Planilla de Información Anual (P.I.A.).
+                  💡 El bono es colaborativo y no genera deuda. El <strong>Anual</strong> es un valor único
+                  por familia (se completa con la cuota social fijada en el acta); los <strong>Materiales</strong>
+                  se cobran por alumno y la tarifa <strong>Hermanos</strong> se aplica sólo a las familias con dos o
+                  más alumnos vinculados. Estos valores se usan como importe sugerido al registrar el pago.
                 </span>
               </Card>
             </div>
 
-            {puedeEditar && (
+            {(puedeEditar || puedeEditarSaldos) && (
               <div className={s.formActions}>
                 <Button type="submit" disabled={savingInst}>
-                  {savingInst ? "Guardando..." : "Guardar Datos de la Cooperadora"}
+                  {savingInst
+                    ? "Guardando..."
+                    : puedeEditar
+                      ? "Guardar Datos de la Cooperadora"
+                      : "Guardar Saldos en Banco"}
                 </Button>
+                {mensajeGuardado && <span className={s.savedMsg}>✓ {mensajeGuardado}</span>}
               </div>
             )}
           </form>
@@ -1021,7 +1119,7 @@ export default function ComisionDirectiva() {
               </button>
             </div>
 
-            <form onSubmit={handleGuardarMiembroModal}>
+            <form className={s.modalForm} onSubmit={handleGuardarMiembroModal}>
               <div className={s.modalBody}>
                 <SelectField
                   label="Vinculación de la autoridad"
@@ -1195,7 +1293,7 @@ export default function ComisionDirectiva() {
               </button>
             </div>
 
-            <form onSubmit={handleGuardarPersonalModal}>
+            <form className={s.modalForm} onSubmit={handleGuardarPersonalModal}>
               <div className={s.modalBody}>
                 <div className={s.modalRow}>
                   <Field

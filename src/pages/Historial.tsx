@@ -54,7 +54,13 @@ export default function Historial() {
   const columnas: Column<AuditoriaFila>[] = [
     { header: "Fecha y hora", minWidth: 155, flex: true, render: (e) => e.fechaHora },
     { header: "Usuario", minWidth: 170, flex: true, render: (e) => e.usuario },
-    { header: "Qué pasó", minWidth: 260, flex: true, render: descripcionAuditoria },
+    { header: "Qué pasó", minWidth: 220, flex: true, render: descripcionAuditoria },
+    {
+      header: "Detalle",
+      minWidth: 260,
+      flex: true,
+      render: (e) => e.detalle || "—",
+    },
     { header: "ID", width: 70, align: "center", render: (e) => e.entidadId ?? "—" },
   ];
 

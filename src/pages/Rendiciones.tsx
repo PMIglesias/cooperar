@@ -40,6 +40,7 @@ export default function Rendiciones() {
   const [meses, setMeses] = useState<MesRendicion[]>([]);
   const [aprobando, setAprobando] = useState(false);
   const [rendicionParaEliminar, setRendicionParaEliminar] = useState<{ id: number; periodo: string } | null>(null);
+  const [actualizando, setActualizando] = useState(false);
 
   const cargarRendiciones = () => {
     setLoading(true);
@@ -155,6 +156,31 @@ export default function Rendiciones() {
     }
   };
 
+  /**
+   * Recalcula la rendición con la caja actual del período y refresca la planilla en pantalla,
+   * sin tener que eliminarla y volver a crearla.
+   */
+  const actualizarRendicion = async (id: number) => {
+    setActualizando(true);
+    try {
+      await api.actualizarRendicion(id);
+      const [lista, lineas, mesesActuales] = await Promise.all([
+        api.listarRendiciones(),
+        api.detalleRendicion(id),
+        api.detalleMensualRendicion(id),
+      ]);
+      setRendiciones(lista);
+      const fila = lista.find((r) => r.id === id);
+      if (fila) setRendicionSeleccionada(fila);
+      setDetalle(lineas);
+      setMeses(mesesActuales);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setActualizando(false);
+    }
+  };
+
   const confirmarEliminarRendicion = async () => {
     if (!rendicionParaEliminar) return;
     try {
@@ -207,7 +233,7 @@ export default function Rendiciones() {
       </style></head><body>
       <h1>Planilla de Rendición de Cuentas</h1>
       <div class="subtitle">Asociación Cooperadora Escolar — ${escapar(rendicionSeleccionada.periodo)}</div>
-      <div class="meta"><span>Período: ${escapar(rendicionSeleccionada.desde)} al ${escapar(rendicionSeleccionada.hasta)}</span><span>Generada por: ${escapar(rendicionSeleccionada.generadaPor)}</span><span>Estado: ${escapar(rendicionSeleccionada.estado)}</span></div>
+      <div class="meta"><span>Período: ${escapar(rendicionSeleccionada.desde)} al ${escapar(rendicionSeleccionada.hasta)}</span><span>Generada por: ${escapar(rendicionSeleccionada.generadaPor)}</span><span>Estado: ${escapar(rendicionSeleccionada.estado)}</span>${rendicionSeleccionada.actualizadaEn ? `<span>Actualizada: ${escapar(rendicionSeleccionada.actualizadaEn)}</span>` : ""}</div>
       <div class="grid">
         <section><h2 class="income">I. INGRESOS</h2><table>${filas(lineasIngreso, "Sin ingresos en el período")}<tr class="total income"><td>TOTAL INGRESOS</td><td>+ ${escapar(money(rendicionSeleccionada.totalIngresos))}</td></tr></table></section>
         <section><h2 class="expense">II. EGRESOS</h2><table>${filas(lineasEgreso, "Sin egresos en el período")}<tr class="total expense"><td>TOTAL EGRESOS</td><td>- ${escapar(money(rendicionSeleccionada.totalEgresos))}</td></tr></table></section>
@@ -273,11 +299,18 @@ export default function Rendiciones() {
     },
     {
       header: "Estado",
-      width: 100,
+      width: 130,
       render: (r) => (
-        <Badge tone={r.estado === "Aprobada" ? "ok" : "warn"}>
-          {r.estado === "Aprobada" ? "Aprobada" : "Borrador"}
-        </Badge>
+        <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
+          <Badge tone={r.estado === "Aprobada" ? "ok" : "warn"}>
+            {r.estado === "Aprobada" ? "Aprobada" : "Borrador"}
+          </Badge>
+          {r.actualizadaEn && (
+            <span style={{ fontSize: "var(--fs-xs)", color: "var(--color-text-muted)" }}>
+              Actualizada: {r.actualizadaEn}
+            </span>
+          )}
+        </div>
       ),
     },
     {
@@ -514,7 +547,9 @@ export default function Rendiciones() {
       }
     >
       {rendicionSeleccionada && (
-        <div className={s.sheetPaper}>
+        <div className={s.detailLayout}>
+          <div className={s.sheetScroll}>
+            <div className={s.sheetPaper}>
           <div className={s.sheetHeader}>
             <div className={s.sheetTitle}>Planilla de Rendición de Cuentas</div>
             <div className={s.sheetSubtitle}>Asociación Cooperadora Escolar — {rendicionSeleccionada.periodo}</div>
@@ -522,6 +557,9 @@ export default function Rendiciones() {
               <span>Período: {rendicionSeleccionada.desde} al {rendicionSeleccionada.hasta}</span>
               <span>Generada por: {rendicionSeleccionada.generadaPor}</span>
               <span>Estado: {rendicionSeleccionada.estado} {rendicionSeleccionada.aprobadaPor ? `(${rendicionSeleccionada.aprobadaPor})` : ""}</span>
+              {rendicionSeleccionada.actualizadaEn && (
+                <span>Actualizada: {rendicionSeleccionada.actualizadaEn}</span>
+              )}
             </div>
           </div>
 
@@ -617,14 +655,28 @@ export default function Rendiciones() {
             <div className={s.signBox}>Presidente</div>
             <div className={s.signBox}>Revisor de Cuentas</div>
           </div>
+            </div>
+          </div>
 
-          <div style={{ marginTop: "var(--space-5)", display: "flex", gap: "var(--space-3)", flexWrap: "wrap" }}>
+          {/* Acciones fijas al pie, fuera de la plantilla */}
+          {((puedeAprobar && rendicionSeleccionada.estado === "Borrador") || puedeCrear || (puedeEliminar && rendicionSeleccionada.estado === "Borrador")) && (
+          <div className={s.sheetActions}>
             {puedeAprobar && rendicionSeleccionada.estado === "Borrador" && (
               <Button
                 onClick={() => aprobarRendicion(rendicionSeleccionada.id)}
                 disabled={aprobando}
               >
                 {aprobando ? "Aprobando..." : "✓ Aprobar rendición formalmente"}
+              </Button>
+            )}
+            {puedeCrear && (
+              <Button
+                variant="secondary"
+                onClick={() => void actualizarRendicion(rendicionSeleccionada.id)}
+                disabled={actualizando}
+                title="Recalcula el detalle con los movimientos actuales de la caja del período"
+              >
+                {actualizando ? "Actualizando..." : "⟳ Actualizar valores"}
               </Button>
             )}
             {puedeEliminar && rendicionSeleccionada.estado === "Borrador" && (
@@ -641,6 +693,7 @@ export default function Rendiciones() {
               </Button>
             )}
           </div>
+          )}
 
           <ConfirmDialog
             isOpen={rendicionParaEliminar !== null}

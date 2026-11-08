@@ -14,7 +14,8 @@ CREATE TABLE IF NOT EXISTS asociados(
   id INTEGER PRIMARY KEY, apellido_nombre TEXT NOT NULL, dni TEXT NOT NULL UNIQUE,
   telefono TEXT, email TEXT, fecha_alta TEXT NOT NULL DEFAULT (date('now','localtime')),
   exento INTEGER NOT NULL DEFAULT 0, activo INTEGER NOT NULL DEFAULT 1,
-  tipo_vinculo TEXT NOT NULL DEFAULT 'PADRE_TUTOR');
+  tipo_vinculo TEXT NOT NULL DEFAULT 'PADRE_TUTOR',
+  tiene_hermanos INTEGER NOT NULL DEFAULT 0);
 CREATE TABLE IF NOT EXISTS alumnos(
   id INTEGER PRIMARY KEY, asociado_id INTEGER NOT NULL REFERENCES asociados(id) ON DELETE CASCADE,
   nombre TEXT NOT NULL, curso TEXT NOT NULL);
@@ -22,12 +23,15 @@ CREATE TABLE IF NOT EXISTS movimientos_caja(
   id INTEGER PRIMARY KEY, fecha TEXT NOT NULL, tipo TEXT NOT NULL CHECK(tipo IN ('Ingreso','Egreso')),
   categoria TEXT NOT NULL, descripcion TEXT NOT NULL, monto INTEGER NOT NULL,
   comprobante TEXT, anulado INTEGER NOT NULL DEFAULT 0, motivo_anulacion TEXT,
-  adjunto_nombre TEXT, adjunto_datos TEXT, registrado_por INTEGER REFERENCES usuarios(id), registrado_en TEXT);
+  adjunto_nombre TEXT, adjunto_datos TEXT, registrado_por INTEGER REFERENCES usuarios(id), registrado_en TEXT,
+  grupo_otros TEXT);
 CREATE TABLE IF NOT EXISTS pagos(
   id INTEGER PRIMARY KEY, asociado_id INTEGER NOT NULL REFERENCES asociados(id),
   periodo TEXT NOT NULL, fecha_pago TEXT NOT NULL, monto INTEGER NOT NULL, medio TEXT NOT NULL,
   comprobante TEXT, anulado INTEGER NOT NULL DEFAULT 0, registrado_por INTEGER NOT NULL REFERENCES usuarios(id),
-  movimiento_id INTEGER REFERENCES movimientos_caja(id));
+  movimiento_id INTEGER REFERENCES movimientos_caja(id),
+  concepto TEXT NOT NULL DEFAULT 'CUOTA_MENSUAL',
+  observaciones TEXT);
 CREATE TABLE IF NOT EXISTS reuniones(
   id INTEGER PRIMARY KEY, fecha TEXT NOT NULL, tipo TEXT NOT NULL CHECK(tipo IN ('Comisión','Asamblea')),
   temas TEXT NOT NULL, acta TEXT, archivo_adjunto TEXT, registrado_por INTEGER REFERENCES usuarios(id));
@@ -67,7 +71,7 @@ CREATE TABLE IF NOT EXISTS rendiciones(
   generada_en TEXT NOT NULL, generada_por INTEGER NOT NULL REFERENCES usuarios(id),
   estado TEXT NOT NULL DEFAULT 'Borrador' CHECK(estado IN ('Borrador','Aprobada')),
   aprobada_por INTEGER REFERENCES usuarios(id), aprobada_en TEXT, pdf TEXT,
-  snapshot TEXT);
+  snapshot TEXT, actualizada_en TEXT);
 CREATE TABLE IF NOT EXISTS configuracion(clave TEXT PRIMARY KEY, valor TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS auditoria(
   id INTEGER PRIMARY KEY,
@@ -75,7 +79,8 @@ CREATE TABLE IF NOT EXISTS auditoria(
   fecha_hora TEXT NOT NULL DEFAULT (datetime('now','localtime')),
   accion TEXT NOT NULL,
   entidad TEXT NOT NULL,
-  entidad_id INTEGER
+  entidad_id INTEGER,
+  detalle TEXT
 );
 
 CREATE TABLE IF NOT EXISTS personal_establecimiento(
@@ -120,15 +125,30 @@ CREATE TABLE IF NOT EXISTS documentos_asambleas(
 
 DROP VIEW IF EXISTS v_asociados;
 CREATE VIEW v_asociados AS
-SELECT *,
-  CASE WHEN exento = 1 THEN 'Exento'
-       WHEN (CAST(strftime('%Y','now','localtime') AS INTEGER) * 12 + CAST(strftime('%m','now','localtime') AS INTEGER))
-          - (CAST(substr(ult,1,4) AS INTEGER) * 12 + CAST(substr(ult,6,2) AS INTEGER)) > 0 THEN 'Con deuda'
-       ELSE 'Al día' END AS estado_cuotas
-FROM (
+SELECT * FROM (
   SELECT a.*,
     (SELECT group_concat(nombre || ' (' || curso || ')', ', ') FROM alumnos WHERE asociado_id = a.id) AS alumnos,
-    COALESCE((SELECT MAX(periodo) FROM pagos WHERE asociado_id = a.id AND anulado = 0), strftime('%Y-%m', a.fecha_alta, '-1 month')) AS ult
+    (SELECT COUNT(*) FROM alumnos WHERE asociado_id = a.id) AS cantidad_alumnos,
+    -- Detalle por concepto del año corriente: la ficha muestra si abonó el bono de la
+    -- cooperadora y el de materiales por separado.
+    CASE WHEN EXISTS (
+           SELECT 1 FROM pagos p
+           WHERE p.asociado_id = a.id AND p.anulado = 0 AND p.concepto = 'BONO_ANUAL'
+             AND substr(p.periodo, 1, 4) = strftime('%Y','now','localtime')
+         ) THEN 1 ELSE 0 END AS bono_anual_pagado,
+    CASE WHEN EXISTS (
+           SELECT 1 FROM pagos p
+           WHERE p.asociado_id = a.id AND p.anulado = 0 AND p.concepto = 'MATERIALES'
+             AND substr(p.periodo, 1, 4) = strftime('%Y','now','localtime')
+         ) THEN 1 ELSE 0 END AS materiales_pagado,
+    -- El bono es colaborativo: no genera deuda. El estado sólo informa si la familia
+    -- ya colaboró en el año corriente, con el bono anual o con los materiales.
+    CASE WHEN EXISTS (
+           SELECT 1 FROM pagos p
+           WHERE p.asociado_id = a.id
+             AND p.anulado = 0
+             AND substr(p.periodo, 1, 4) = strftime('%Y','now','localtime')
+         ) THEN 'Colaboró' ELSE 'No colaboró' END AS estado_colaboracion
   FROM asociados a
 );
 ";
@@ -157,16 +177,23 @@ pub fn init(dir: &Path) -> Result<Connection, Box<dyn std::error::Error>> {
     let _ = conn.execute("ALTER TABLE movimientos_caja ADD COLUMN adjunto_datos TEXT", []);
     let _ = conn.execute("ALTER TABLE movimientos_caja ADD COLUMN registrado_por INTEGER REFERENCES usuarios(id)", []);
     let _ = conn.execute("ALTER TABLE movimientos_caja ADD COLUMN registrado_en TEXT", []);
+    let _ = conn.execute("ALTER TABLE movimientos_caja ADD COLUMN grupo_otros TEXT", []);
     let _ = conn.execute("ALTER TABLE reuniones ADD COLUMN registrado_por INTEGER REFERENCES usuarios(id)", []);
     let _ = conn.execute("ALTER TABLE actas ADD COLUMN archivo_adjunto TEXT", []);
     let _ = conn.execute("ALTER TABLE actas ADD COLUMN cuadro_financiero TEXT NOT NULL DEFAULT '{}'", []);
     let _ = conn.execute("ALTER TABLE rendiciones ADD COLUMN snapshot TEXT", []);
+    let _ = conn.execute("ALTER TABLE rendiciones ADD COLUMN actualizada_en TEXT", []);
     let _ = conn.execute("ALTER TABLE comision_directiva ADD COLUMN asociado_id INTEGER REFERENCES asociados(id) ON DELETE SET NULL", []);
     let _ = conn.execute("ALTER TABLE comision_directiva ADD COLUMN personal_establecimiento_id INTEGER REFERENCES personal_establecimiento(id) ON DELETE SET NULL", []);
     let _ = conn.execute("ALTER TABLE asociados ADD COLUMN tipo_vinculo TEXT NOT NULL DEFAULT 'PADRE_TUTOR'", []);
+    let _ = conn.execute("ALTER TABLE asociados ADD COLUMN tiene_hermanos INTEGER NOT NULL DEFAULT 0", []);
+    // Los pagos previos al bono contribución quedan identificados como cuota mensual histórica
+    let _ = conn.execute("ALTER TABLE pagos ADD COLUMN concepto TEXT NOT NULL DEFAULT 'CUOTA_MENSUAL'", []);
+    let _ = conn.execute("ALTER TABLE pagos ADD COLUMN observaciones TEXT", []);
     let _ = conn.execute("ALTER TABLE documentos_asambleas ADD COLUMN aprobado INTEGER NOT NULL DEFAULT 0", []);
     let _ = conn.execute("ALTER TABLE documentos_asambleas ADD COLUMN aprobado_por TEXT", []);
     let _ = conn.execute("ALTER TABLE documentos_asambleas ADD COLUMN aprobado_en TEXT", []);
+    let _ = conn.execute("ALTER TABLE auditoria ADD COLUMN detalle TEXT", []);
     let _ = conn.execute("UPDATE pagos SET anulado = 0 WHERE anulado IS NULL", []);
 
     let usuarios_sql: Option<String> = conn
@@ -217,7 +244,18 @@ pub fn init(dir: &Path) -> Result<Connection, Box<dyn std::error::Error>> {
     }
 
     conn.execute_batch(SCHEMA)?;
-    let _ = conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_pagos_asociado_periodo_activo ON pagos(asociado_id, periodo) WHERE anulado=0", []);
+    // Un asociado puede abonar el bono anual y los materiales del mismo año: la unicidad
+    // pasa a ser por concepto y año lectivo (no por período mensual).
+    let _ = conn.execute("DROP INDEX IF EXISTS idx_pagos_asociado_periodo_activo", []);
+    let _ = conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_pagos_asociado_concepto_anio_activo ON pagos(asociado_id, concepto, periodo) WHERE anulado = 0", []);
+
+    // La condición de hermanos se deriva de los alumnos vinculados (dos o más), también
+    // para las bases que se migran desde versiones anteriores.
+    let _ = conn.execute(
+        "UPDATE asociados SET tiene_hermanos = CASE
+           WHEN (SELECT COUNT(*) FROM alumnos al WHERE al.asociado_id = asociados.id) > 1 THEN 1 ELSE 0 END",
+        [],
+    );
 
     let n: i64 = conn.query_row("SELECT COUNT(*) FROM usuarios", [], |r| r.get(0))?;
     if n == 0 {
@@ -235,15 +273,15 @@ pub fn init(dir: &Path) -> Result<Connection, Box<dyn std::error::Error>> {
 
         // 2. Asociados genéricos
         conn.execute(
-            "INSERT INTO asociados(id, apellido_nombre, dni, telefono, email, fecha_alta, exento) VALUES
-             (1, 'Álvarez, Marcos', '32111222', '11-4567-8901', 'marcos.alvarez@email.com', date('now', '-3 months'), 0),
-             (2, 'Fernández, Valeria', '29888777', '11-9876-5432', 'valeria.fernandez@email.com', date('now', '-6 months'), 0),
-             (3, 'Gómez, Santiago', '34555666', '11-2233-4455', 'santiago.gomez@email.com', date('now', '-1 year'), 1),
-             (4, 'López, Mariana', '31222333', '11-6677-8899', 'mariana.lopez@email.com', date('now', '-2 months'), 0),
-             (5, 'Martínez, Diego', '28777666', '11-3344-5566', 'diego.martinez@email.com', date('now', '-5 months'), 0),
-             (6, 'Rodríguez, Laura', '33444555', '11-5566-7788', 'laura.rodriguez@email.com', date('now', '-1 month'), 0),
-             (7, 'Romero, Pablo', '30111444', '11-7788-9900', 'pablo.romero@email.com', date('now', '-4 months'), 0),
-             (8, 'Sánchez, Elena', '27999111', '11-8899-0011', 'elena.sanchez@email.com', date('now', '-8 months'), 0)",
+            "INSERT INTO asociados(id, apellido_nombre, dni, telefono, email, fecha_alta, exento, tiene_hermanos) VALUES
+             (1, 'Álvarez, Marcos', '32111222', '11-4567-8901', 'marcos.alvarez@email.com', date('now', '-3 months'), 0, 0),
+             (2, 'Fernández, Valeria', '29888777', '11-9876-5432', 'valeria.fernandez@email.com', date('now', '-6 months'), 0, 1),
+             (3, 'Gómez, Santiago', '34555666', '11-2233-4455', 'santiago.gomez@email.com', date('now', '-1 year'), 0, 0),
+             (4, 'López, Mariana', '31222333', '11-6677-8899', 'mariana.lopez@email.com', date('now', '-2 months'), 0, 0),
+             (5, 'Martínez, Diego', '28777666', '11-3344-5566', 'diego.martinez@email.com', date('now', '-5 months'), 0, 0),
+             (6, 'Rodríguez, Laura', '33444555', '11-5566-7788', 'laura.rodriguez@email.com', date('now', '-1 month'), 0, 0),
+             (7, 'Romero, Pablo', '30111444', '11-7788-9900', 'pablo.romero@email.com', date('now', '-4 months'), 0, 0),
+             (8, 'Sánchez, Elena', '27999111', '11-8899-0011', 'elena.sanchez@email.com', date('now', '-8 months'), 0, 0)",
             [],
         )?;
 
@@ -291,15 +329,18 @@ pub fn init(dir: &Path) -> Result<Connection, Box<dyn std::error::Error>> {
             [],
         )?;
 
-        // 5. Pagos registrados mes actual (dejando a asociado 2 con deuda)
+        // 5. Bonos contribución del año corriente (colaborativos: no generan deuda)
+        //    Bono anual: $12.000 por familia. Materiales: $5.000 por alumno ($4.000 con hermanos).
         conn.execute(
-            "INSERT INTO pagos(asociado_id, periodo, fecha_pago, monto, medio, comprobante, registrado_por) VALUES
-             (1, strftime('%Y-%m','now','localtime'), date('now', '-3 days'), 8000, 'Efectivo', 'REC-001', 4),
-             (4, strftime('%Y-%m','now','localtime'), date('now', '-2 days'), 8000, 'Transferencia', 'TRF-1029', 4),
-             (5, strftime('%Y-%m','now','localtime'), date('now', '-2 days'), 8000, 'Efectivo', 'REC-002', 4),
-             (6, strftime('%Y-%m','now','localtime'), date('now', '-1 day'), 8000, 'Transferencia', 'TRF-1033', 4),
-             (7, strftime('%Y-%m','now','localtime'), date('now', '-1 day'), 8000, 'Efectivo', 'REC-003', 4),
-             (8, strftime('%Y-%m','now','localtime'), date('now'), 8000, 'Transferencia', 'TRF-1045', 4)",
+            "INSERT INTO pagos(asociado_id, periodo, concepto, fecha_pago, monto, medio, comprobante, registrado_por) VALUES
+             (1, strftime('%Y','now','localtime'), 'BONO_ANUAL', date('now', '-4 days'), 12000, 'Efectivo', 'BONO-001', 4),
+             (4, strftime('%Y','now','localtime'), 'BONO_ANUAL', date('now', '-3 days'), 12000, 'Transferencia', 'BONO-002', 4),
+             (5, strftime('%Y','now','localtime'), 'BONO_ANUAL', date('now', '-3 days'), 12000, 'Efectivo', 'BONO-003', 4),
+             (6, strftime('%Y','now','localtime'), 'BONO_ANUAL', date('now', '-2 days'), 12000, 'Transferencia', 'BONO-004', 4),
+             (8, strftime('%Y','now','localtime'), 'BONO_ANUAL', date('now', '-1 day'), 12000, 'Transferencia', 'BONO-005', 4),
+             (1, strftime('%Y','now','localtime'), 'MATERIALES', date('now', '-2 days'), 5000, 'Efectivo', 'MAT-001', 4),
+             (2, strftime('%Y','now','localtime'), 'MATERIALES', date('now', '-1 day'), 8000, 'Transferencia', 'MAT-002', 4),
+             (4, strftime('%Y','now','localtime'), 'MATERIALES', date('now'), 5000, 'Transferencia', 'MAT-003', 4)",
             [],
         )?;
 
@@ -372,7 +413,9 @@ pub fn init(dir: &Path) -> Result<Connection, Box<dyn std::error::Error>> {
         );
     }
     let configuraciones_base = [
-        ("monto_cuota", "8000"),
+        ("bono_anual", "12000"),
+        ("materiales", "5000"),
+        ("materiales_hermanos", "4000"),
         ("distrito", "Morón"),
         ("numero_escuela", "E.P. N° 12"),
         ("nombre_escuela", "General José de San Martín"),
@@ -389,8 +432,11 @@ pub fn init(dir: &Path) -> Result<Connection, Box<dyn std::error::Error>> {
         ("cuenta_corriente", "5012-12345/6"),
         ("cbu", "0140012301501201234567"),
         ("alias", "COOP.EP12.MORON"),
-        ("cuota_mensual", "8000"),
-        ("cuota_anual", "80000"),
+        // Saldos en banco informados en la cooperadora: alimentan el acta y, desde ahí, el P.I.A.
+        ("saldo_cuenta_corriente", "0"),
+        ("saldo_plazo_fijo", "0"),
+        // Monto de caja chica fijado en asamblea
+        ("caja_chica", "0"),
     ];
 
     for (k, v) in configuraciones_base {
@@ -415,6 +461,20 @@ pub fn init(dir: &Path) -> Result<Connection, Box<dyn std::error::Error>> {
              (4, 'PIA_COOPERADORA', 'Planilla de Información Anual (P.I.A.) 2024/2025', '2025', '2025-05-18 19:00', 'Roberto Fernández', 'pia_cooperadoras_2025.pdf', '{\"ejercicio\":\"2024/2025\",\"periodo\":\"2025\",\"saldoInicialCaja\":150000,\"saldoInicialBanco\":230000,\"totalCuotas\":480000,\"totalDonaciones\":35000,\"totalRifas\":60000,\"totalFestivales\":185000,\"totalKiosco\":80000,\"intereses\":6000,\"reintegrados\":2000,\"subsidios\":250000,\"otrosIngresosA\":20000,\"otrosIngresosB\":15000,\"ropaCalzado\":45000,\"librosUtiles\":80000,\"excursiones\":55000,\"emergencias\":15000,\"golosinasPremios\":22000,\"materialDidactico\":60000,\"mantSubsidios\":150000,\"mantFondosPropios\":85000,\"limpieza\":42000,\"combustible\":25000,\"libreria\":20000,\"mobiliario\":70000,\"organizacionRifas\":15000,\"organizacionFestivales\":35000,\"gastosKiosco\":40000,\"otrosGastosA\":10000,\"otrosGastosB\":7000,\"cuotaSocialAprobada\":8000,\"cajaChicaAprobada\":40000}')",
             [],
         )?;
+    }
+
+    // Unificación de categorías históricas con la nomenclatura vigente de Caja: el bono
+    // contribución se asienta como "Cuota Social", que es como debe figurar en la rendición.
+    for (vieja, nueva) in [
+        ("Bono Contribución", "Cuota Social"),
+        ("Cuotas", "Cuota Social"),
+        ("Cuota social", "Cuota Social"),
+        ("Donaciones", "Donación de dinero"),
+        ("Mantenimiento y Reparaciones", "Mant. y mejoras con fondos propios"),
+        ("Artículos de Limpieza", "Artículos de limpieza"),
+        ("Subsidios", "Subsidios de la DGCYE"),
+    ] {
+        let _ = conn.execute("UPDATE movimientos_caja SET categoria = ?1 WHERE categoria = ?2", [nueva, vieja]);
     }
 
     Ok(conn)

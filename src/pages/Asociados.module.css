@@ -40,10 +40,15 @@
   gap: var(--space-6);
 }
 
+/* Ficha: cuatro datos por fila (vínculo, DNI, teléfono, correo / alta, hermanos, bono, estado) */
 .fichaGrid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: var(--space-4) var(--space-6);
+}
+
+@media (max-width: 1180px) {
+  .fichaGrid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
 .fichaItem {
@@ -331,4 +336,24 @@
   height: 16px;
   cursor: pointer;
   accent-color: var(--color-primary);
+}
+
+/* Número de socio: identificador estable, visible en el listado y en la ficha */
+.socioNumero {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: var(--fs-sm);
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  white-space: nowrap;
+  color: var(--color-primary);
+}
+
+/* En la ficha se destaca sobre el encabezado, junto al nombre */
+.socioNumeroDestacado {
+  font-size: var(--fs-h3);
+  letter-spacing: 1px;
+  padding: 3px var(--space-4);
+  background: var(--color-primary-bg);
+  border-radius: var(--radius-sm);
+  line-height: 1.2;
 }

@@ -5,9 +5,11 @@
 .fieldGrow { flex: 1 1 auto; min-height: 0; }
 
 /* Textarea de descripción */
+/* Textarea de descripción: crece con la ventana pero se adapta cuando aparece el
+   campo extra de "Otros" (sin desbordar sobre monto / comprobante). */
 .control {
   flex: 1 1 auto;
-  min-height: 200px;
+  min-height: 90px;
   width: 100%;
   padding: var(--space-4);
   border: 1.5px solid var(--color-border-field);
@@ -17,7 +19,8 @@
   font-size: var(--fs-base);
   line-height: 1.5;
   font-family: inherit;
-  resize: vertical;
+  resize: none;
+  box-sizing: border-box;
 }
 
 .control::placeholder {

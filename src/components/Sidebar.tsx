@@ -8,7 +8,7 @@ import s from "./Sidebar.module.css";
 const ITEMS: { route: Route; label: string | [string, string]; labelText: string }[] = [
   { route: "inicio", label: "Inicio", labelText: "Inicio" },
   { route: "asociados", label: "Asociados", labelText: "Asociados" },
-  { route: "cuotas", label: "Cuotas y pagos", labelText: "Cuotas y pagos" },
+  { route: "cuotas", label: "Bonos y pagos", labelText: "Bonos y pagos" },
   { route: "caja", label: "Caja", labelText: "Caja" },
   { route: "reuniones", label: "Reuniones", labelText: "Reuniones" },
   { route: "rendiciones", label: "Rendiciones", labelText: "Rendiciones" },
@@ -38,10 +38,10 @@ export default function Sidebar() {
       return ["inicio", "asociados", "reuniones", "actas", "documentacion", "comision"].includes(it.route);
     }
 
-    // Tesorero: gestión financiera y económica (Cuotas, Caja, Rendiciones)
-    // NO administra el padrón de asociados ni reuniones institucionales
+    // Tesorero: gestión financiera y económica (Cuotas, Caja, Rendiciones).
+    // Ve la institución para cargar los saldos en banco de la cooperadora.
     if (usuario.rol === "Tesorero") {
-      return ["inicio", "cuotas", "caja", "rendiciones"].includes(it.route);
+      return ["inicio", "cuotas", "caja", "rendiciones", "comision"].includes(it.route);
     }
 
     // Presidente: supervisión y gobierno institucional (Inicio, Asociados [lectura], Caja [lectura], Rendiciones [aprobación], Reuniones, Documentación, Comisión)

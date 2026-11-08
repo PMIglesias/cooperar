@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, FormEvent } from "react";
-import { api, PagoFila, AsociadoFila, AdjuntoMovimiento, money } from "../api";
+import { api, PagoFila, AsociadoFila, AdjuntoMovimiento, money, hoyISO, CONCEPTOS, ConceptoPago, etiquetaConcepto } from "../api";
 import { useApp } from "../context";
 import Layout from "../components/Layout";
 import Button from "../components/ui/Button";
@@ -11,17 +11,14 @@ import IconButton from "../components/ui/IconButton";
 import { PaperclipIcon, PrinterIcon, ReceiptIcon, SearchIcon } from "../components/icons";
 import s from "./Cuotas.module.css";
 
-const PERIODOS_FILTRO = [
-  { value: "Todos", label: "Todos los períodos" },
-  { value: "2026-10", label: "Octubre 2026" },
-  { value: "2026-09", label: "Septiembre 2026" },
-  { value: "2026-08", label: "Agosto 2026" },
-  { value: "2026-07", label: "Julio 2026" },
-  { value: "2026-06", label: "Junio 2026" },
-  { value: "2026-05", label: "Mayo 2026" },
-  { value: "2026-04", label: "Abril 2026" },
-  { value: "2026-03", label: "Marzo 2026" },
-];
+const ANIO_ACTUAL = new Date().getFullYear();
+
+/** Años del bono: se ofrece el corriente y los siguientes (el listado muestra sólo el año) */
+const ANIOS_BONO = [0, 1, 2].map((i) => String(ANIO_ACTUAL + i));
+
+const ANIOS_FILTRO = [{ value: "Todos", label: "Todos los años" }, ...ANIOS_BONO.map((a) => ({ value: a, label: a }))];
+
+const CONCEPTOS_FILTRO = [{ value: "Todos", label: "Todos los conceptos" }, ...CONCEPTOS];
 
 const MEDIOS_PAGO = [
   "Efectivo",
@@ -36,18 +33,28 @@ export default function Cuotas() {
 
   const [pagos, setPagos] = useState<PagoFila[]>([]);
   const [busqueda, setBusqueda] = useState("");
-  const [periodo, setPeriodo] = useState("Todos");
+  const [anio, setAnio] = useState("Todos");
+  const [conceptoFiltro, setConceptoFiltro] = useState("Todos");
   const [loading, setLoading] = useState(false);
 
   // Lista de asociados para registrar pagos
   const [asociados, setAsociados] = useState<AsociadoFila[]>([]);
 
+  // Tarifas oficiales del bono (se configuran en el detalle de la cooperadora)
+  const [tarifas, setTarifas] = useState({
+    bonoAnual: "0",
+    materiales: "0",
+    materialesHermanos: "0",
+  });
+
   // Formulario Registrar Pago
   const [asociadoId, setAsociadoId] = useState<number | "">("");
   const [busquedaAsociado, setBusquedaAsociado] = useState("");
   const [mostrarDropdownAsoc, setMostrarDropdownAsoc] = useState(false);
-  const [pagoPeriodo, setPagoPeriodo] = useState("2026-10");
-  const [pagoMonto, setPagoMonto] = useState("3000");
+  const [pagoAnio, setPagoAnio] = useState(String(ANIO_ACTUAL));
+  const [pagoConcepto, setPagoConcepto] = useState<ConceptoPago>("BONO_ANUAL");
+  const [pagoMonto, setPagoMonto] = useState("");
+  const [pagoObservaciones, setPagoObservaciones] = useState("");
   const [pagoMedio, setPagoMedio] = useState("Efectivo");
   const [pagoComprobante, setPagoComprobante] = useState("");
   const [pagoAdjuntoNombre, setPagoAdjuntoNombre] = useState<string | null>(null);
@@ -67,7 +74,7 @@ export default function Cuotas() {
 
   const cargarPagos = () => {
     setLoading(true);
-    api.listarPagos(busqueda, periodo)
+    api.listarPagos(busqueda, anio, conceptoFiltro)
       .then(setPagos)
       .catch(console.error)
       .finally(() => setLoading(false));
@@ -75,15 +82,23 @@ export default function Cuotas() {
 
   useEffect(() => {
     cargarPagos();
-  }, [busqueda, periodo]);
+  }, [busqueda, anio, conceptoFiltro]);
 
   useEffect(() => {
-    api.listarAsociados({ busqueda: "", estadoCuotas: "Todos", estado: "1" })
+    api.listarAsociados({ busqueda: "", estadoColaboracion: "Todos", estado: "Activos" })
       .then(setAsociados)
       .catch(console.error);
 
-    api.obtenerConfiguracion("cuota_mensual").then((val) => {
-      if (val) setPagoMonto(val);
+    Promise.all([
+      api.obtenerConfiguracion("bono_anual"),
+      api.obtenerConfiguracion("materiales"),
+      api.obtenerConfiguracion("materiales_hermanos"),
+    ]).then(([bonoAnual, materiales, materialesHermanos]) => {
+      setTarifas({
+        bonoAnual: bonoAnual || "",
+        materiales: materiales || "",
+        materialesHermanos: materialesHermanos || "",
+      });
     }).catch(console.error);
   }, []);
 
@@ -91,14 +106,49 @@ export default function Cuotas() {
     setAsociadoId("");
     setBusquedaAsociado("");
     setMostrarDropdownAsoc(false);
-    setPagoPeriodo(new Date().toISOString().slice(0, 7));
+    setPagoAnio(String(ANIO_ACTUAL));
+    setPagoConcepto("BONO_ANUAL");
+    setPagoMonto("");
     setPagoMedio("Efectivo");
     setPagoComprobante(`REC-${Math.floor(1000 + Math.random() * 9000)}`);
+    setPagoObservaciones("");
     setPagoAdjuntoNombre(null);
     setPagoAdjuntoDatos(null);
     setPagoError(null);
     setVista("nuevo");
   };
+
+  /**
+   * Monto sugerido según el concepto: el bono anual es un importe único por familia y
+   * los materiales se cobran por alumno, con tarifa propia cuando la familia tiene hermanos.
+   */
+  const montoSugerido = (asociado: AsociadoFila | undefined, concepto: ConceptoPago) => {
+    if (concepto === "MATERIALES") {
+      const hermanos = asociado?.tieneHermanos === 1;
+      const cantidadAlumnos = Math.max(asociado?.cantidadAlumnos || 1, 1);
+      const tarifa = Number(hermanos ? tarifas.materialesHermanos : tarifas.materiales) || 0;
+      const total = tarifa * cantidadAlumnos;
+      return total > 0 ? String(total) : "";
+    }
+    const total = Number(tarifas.bonoAnual) || 0;
+    return total > 0 ? String(total) : "";
+  };
+
+  const asociadoDelForm = asociados.find((a) => a.id === Number(asociadoId));
+
+  /** Flechitas de año: suben o bajan el año lectivo de a uno */
+  const cambiarAnio = (delta: number) => {
+    const base = /^\d{4}$/.test(pagoAnio) ? Number(pagoAnio) : ANIO_ACTUAL;
+    const objetivo = base + delta;
+    if (objetivo < 2000 || objetivo > 2100) return;
+    setPagoAnio(String(objetivo));
+  };
+
+  useEffect(() => {
+    if (vista !== "nuevo") return;
+    setPagoMonto(montoSugerido(asociadoDelForm, pagoConcepto));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [vista, asociadoId, pagoConcepto, tarifas]);
 
   const guardarPago = async (e: FormEvent) => {
     e.preventDefault();
@@ -117,12 +167,14 @@ export default function Cuotas() {
     try {
       const nuevoId = await api.registrarPago({
         asociadoId: Number(asociadoId),
-        periodo: pagoPeriodo,
+        periodo: pagoAnio,
+        concepto: pagoConcepto,
         monto: montoNum,
         medio: pagoMedio,
         comprobante: pagoComprobante.trim() || undefined,
         adjuntoNombre: pagoAdjuntoNombre || undefined,
         adjuntoDatos: pagoAdjuntoDatos || undefined,
+        observaciones: pagoObservaciones.trim() || undefined,
       });
 
       const asociado = asociados.find((a) => a.id === Number(asociadoId));
@@ -131,14 +183,16 @@ export default function Cuotas() {
         asociadoId: Number(asociadoId),
         apellidoNombre: asociado ? asociado.apellidoNombre : "Asociado",
         dni: asociado ? asociado.dni : "",
-        periodo: pagoPeriodo,
-        fechaPago: new Date().toISOString().split("T")[0],
+        periodo: pagoAnio,
+        concepto: pagoConcepto,
+        fechaPago: hoyISO(),
         monto: montoNum,
         medio: pagoMedio,
         comprobante: pagoComprobante.trim() || `REC-${nuevoId.toString().slice(-4)}`,
         registradoPor: `${usuario.rol} (${usuario.nombre})`,
         registradoPorRol: usuario.rol,
         registradoPorNombre: usuario.nombre,
+        observaciones: pagoObservaciones.trim() || null,
       });
 
       cargarPagos();
@@ -161,6 +215,7 @@ export default function Cuotas() {
         <td>${escapar(p.apellidoNombre)}</td>
         <td>${escapar(p.dni)}</td>
         <td>${escapar(p.periodo)}</td>
+        <td>${escapar(etiquetaConcepto(p.concepto))}</td>
         <td>${escapar(p.medio)}</td>
         <td>${escapar(money(p.monto))}</td>
       </tr>`).join("");
@@ -190,9 +245,9 @@ export default function Cuotas() {
         </head>
         <body>
           <h1>Listado de pagos</h1>
-          <p>Filtro: ${periodo === "Todos" ? "Todos los períodos" : periodo}</p>
+          <p>Filtro: ${anio === "Todos" ? "Todos los años" : `Año ${anio}`}${conceptoFiltro === "Todos" ? "" : ` · ${etiquetaConcepto(conceptoFiltro)}`}</p>
           <table>
-            <thead><tr><th>Fecha</th><th>Comprobante</th><th>Asociado</th><th>DNI</th><th>Período</th><th>Medio</th><th>Monto</th></tr></thead>
+            <thead><tr><th>Fecha</th><th>Comprobante</th><th>Asociado</th><th>DNI</th><th>Año</th><th>Concepto</th><th>Medio</th><th>Monto</th></tr></thead>
             <tbody>${filas}</tbody>
           </table>
         </body>
@@ -272,12 +327,12 @@ export default function Cuotas() {
         <div class="item"><span>Fecha del movimiento</span><strong>${escapar(pagoDetalle.fechaPago)}</strong></div>
         <div class="item"><span>Registrado por</span><strong>${escapar(pagoDetalle.registradoPor || "—")}</strong></div>
         <div class="item"><span>Monto operado</span><strong class="amount">+ ${escapar(money(pagoDetalle.monto))}</strong></div>
-        <div class="item"><span>Categoría</span><strong>Cuotas</strong></div>
+        <div class="item"><span>Categoría</span><strong>Bono Contribución</strong></div>
         <div class="item"><span>N° de comprobante / factura</span><strong>${escapar(pagoDetalle.comprobante || "Sin comprobante asociado")}</strong></div>
         <div class="item"><span>Medio de pago</span><strong>${escapar(pagoDetalle.medio)}</strong></div>
       </div>
       <div class="description"><strong>Concepto / descripción detallada</strong><br>
-        Asociado N° ${pagoDetalle.asociadoId} - Cuota Social · Período ${escapar(pagoDetalle.periodo)}<br>${escapar(pagoDetalle.apellidoNombre)}
+        Asociado N° ${pagoDetalle.asociadoId} - ${escapar(etiquetaConcepto(pagoDetalle.concepto))} · Año ${escapar(pagoDetalle.periodo)}<br>${escapar(pagoDetalle.apellidoNombre)}${pagoDetalle.observaciones ? `<br><strong>Observaciones:</strong><br>${escapar(pagoDetalle.observaciones).replace(/\n/g, "<br>")}` : ""}
       </div>${comprobante ? `<div class="attachment">${comprobante}</div>` : ""}</body></html>`);
     iframe.contentDocument?.close();
     setTimeout(() => {
@@ -322,10 +377,16 @@ export default function Cuotas() {
     },
     { header: "DNI", minWidth: 90, flex: true, render: (p) => p.dni },
     {
-      header: "Período",
-      minWidth: 85,
+      header: "Año",
+      minWidth: 70,
       flex: true,
-      render: (p) => <Badge tone="ok">{p.periodo}</Badge>,
+      render: (p) => <Badge tone="primary">{p.periodo}</Badge>,
+    },
+    {
+      header: "Concepto",
+      minWidth: 175,
+      flex: true,
+      render: (p) => etiquetaConcepto(p.concepto),
     },
     { header: "Medio", minWidth: 95, flex: true, render: (p) => p.medio },
     {
@@ -371,7 +432,7 @@ export default function Cuotas() {
   if (vista === "lista") {
     return (
       <Layout
-        title="Cuotas y pagos"
+        title="Bonos y pagos"
         action={
           <div style={{ display: "flex", gap: "var(--space-3)" }}>
             <Button
@@ -398,11 +459,18 @@ export default function Cuotas() {
             width={360}
           />
           <SelectField
-            label="Mes de pago"
-            value={periodo}
-            options={PERIODOS_FILTRO}
-            onChange={setPeriodo}
+            label="Año del bono"
+            value={anio}
+            options={ANIOS_FILTRO}
+            onChange={setAnio}
             width={200}
+          />
+          <SelectField
+            label="Concepto"
+            value={conceptoFiltro}
+            options={CONCEPTOS_FILTRO}
+            onChange={setConceptoFiltro}
+            width={230}
           />
         </div>
 
@@ -433,7 +501,7 @@ export default function Cuotas() {
                   <div><span>Fecha del movimiento</span><strong>{pagoDetalle.fechaPago}</strong></div>
                   <div><span>Registrado por</span><strong>{pagoDetalle.registradoPor || "—"}</strong></div>
                   <div><span>Monto operado</span><strong className={s.detailAmount}>+ {money(pagoDetalle.monto)}</strong></div>
-                  <div><span>Categoría</span><strong>Cuotas</strong></div>
+                  <div><span>Categoría</span><strong>Bono Contribución</strong></div>
                   <div>
                     <span>N° de comprobante / factura</span>
                     <div className={s.detailInline}>
@@ -450,7 +518,10 @@ export default function Cuotas() {
                 {detalleAdjuntoError && <p className={s.detailAttachmentError}>{detalleAdjuntoError}</p>}
                 <div className={s.detailDescription}>
                   <span>Concepto / descripción detallada</span>
-                  <p>Asociado N° {pagoDetalle.asociadoId} - Cuota Social · Período {pagoDetalle.periodo}<br />{pagoDetalle.apellidoNombre}</p>
+                  <p>Asociado N° {pagoDetalle.asociadoId} - {etiquetaConcepto(pagoDetalle.concepto)} · Año {pagoDetalle.periodo}<br />{pagoDetalle.apellidoNombre}</p>
+                  {pagoDetalle.observaciones && (
+                    <p style={{ marginTop: "var(--space-2)", whiteSpace: "pre-wrap" }}><strong>Observaciones:</strong> {pagoDetalle.observaciones}</p>
+                  )}
                 </div>
                 {pagoDetalle.adjuntoNombre && (
                   <label className={`${s.printOption} ${s.noPrint}`}>
@@ -516,7 +587,8 @@ export default function Cuotas() {
 
     return (
       <Layout
-        title="Cuotas y pagos › Registrar pago"
+        title="Bonos y pagos › Registrar pago"
+        hideContentOverflow
         action={
           <Button variant="secondary" onClick={() => setVista("lista")}>
             ← Volver al listado
@@ -546,8 +618,8 @@ export default function Cuotas() {
                           ({asociadoSeleccionado.alumnos})
                         </span>
                       )}
-                      <Badge tone={asociadoSeleccionado.estadoCuotas === "Al día" ? "ok" : "warn"}>
-                        {asociadoSeleccionado.estadoCuotas}
+                      <Badge tone={asociadoSeleccionado.estadoColaboracion === "Colaboró" ? "ok" : "warn"}>
+                        {asociadoSeleccionado.estadoColaboracion}
                       </Badge>
                     </div>
                     <Button
@@ -621,8 +693,8 @@ export default function Cuotas() {
                               </div>
                               <div style={{ display: "flex", alignItems: "center", gap: "var(--space-2)" }}>
                                 <span className={s.asociadoOptionDni}>DNI {a.dni}</span>
-                                <Badge tone={a.estadoCuotas === "Al día" ? "ok" : "warn"}>
-                                  {a.estadoCuotas}
+                                <Badge tone={a.estadoColaboracion === "Colaboró" ? "ok" : "warn"}>
+                                  {a.estadoColaboracion}
                                 </Badge>
                               </div>
                             </div>
@@ -635,14 +707,51 @@ export default function Cuotas() {
               </div>
 
               <div className={s.formRow}>
-                <Field
-                  label="Período abonado"
-                  type="month"
-                  value={pagoPeriodo}
-                  onChange={(e) => setPagoPeriodo(e.target.value)}
-                  width={220}
+                <SelectField
+                  label="Concepto del pago"
+                  value={pagoConcepto}
+                  options={CONCEPTOS}
+                  onChange={(v) => setPagoConcepto(v as ConceptoPago)}
+                  width={280}
                   required
                 />
+                <div className={s.yearField}>
+                  <span className={s.yearLabel}>Año del bono</span>
+                  <div className={s.yearStepper}>
+                    <input
+                      className={s.yearInput}
+                      type="text"
+                      inputMode="numeric"
+                      maxLength={4}
+                      value={pagoAnio}
+                      onChange={(e) => setPagoAnio(e.target.value.replace(/\D/g, "").slice(0, 4))}
+                      onBlur={() => {
+                        if (!/^\d{4}$/.test(pagoAnio)) setPagoAnio(String(ANIO_ACTUAL));
+                      }}
+                      aria-label="Año del bono"
+                    />
+                    <span className={s.yearArrows}>
+                      <button
+                        type="button"
+                        className={s.yearBtn}
+                        onClick={() => cambiarAnio(1)}
+                        title="Año siguiente"
+                        aria-label="Año siguiente"
+                      >
+                        ▲
+                      </button>
+                      <button
+                        type="button"
+                        className={s.yearBtn}
+                        onClick={() => cambiarAnio(-1)}
+                        title="Año anterior"
+                        aria-label="Año anterior"
+                      >
+                        ▼
+                      </button>
+                    </span>
+                  </div>
+                </div>
                 <Field
                   label="Monto ($)"
                   type="number"
@@ -654,6 +763,13 @@ export default function Cuotas() {
                   required
                 />
               </div>
+              <p style={{ margin: 0, color: "var(--color-text-muted)", fontSize: "var(--fs-sm)" }}>
+                {asociadoDelForm
+                  ? pagoConcepto === "MATERIALES"
+                    ? `${asociadoDelForm.tieneHermanos === 1 ? "Tarifa con hermanos" : "Tarifa general"} × ${Math.max(asociadoDelForm.cantidadAlumnos, 1)} alumno(s) · el monto se puede ajustar`
+                    : "Importe único por familia · el monto se puede ajustar"
+                  : "Elegí un asociado para ver el monto sugerido del bono."}
+              </p>
 
               <div className={s.formRow}>
                 <SelectField
@@ -704,21 +820,33 @@ export default function Cuotas() {
                 />
                 {pagoAdjuntoNombre && <span className={s.attachmentName}>{pagoAdjuntoNombre}</span>}
               </div>
-            </div>
 
-            <div className={s.actionRow}>
-              <Button type="submit" disabled={pagoSaving}>
-                {pagoSaving ? "Registrando..." : "Confirmar pago"}
-              </Button>
-              <Button
-                variant="secondary"
-                onClick={() => setVista("lista")}
-                disabled={pagoSaving}
-              >
-                Cancelar
-              </Button>
+              <div className={s.obsField}>
+                <label className={s.obsLabel}>
+                  <span>Observaciones</span>
+                  <textarea
+                    className={s.obsTextarea}
+                    placeholder="Ej: entregó la abuela del alumno, pago acordado en cuotas…"
+                    value={pagoObservaciones}
+                    onChange={(e) => setPagoObservaciones(e.target.value)}
+                  />
+                </label>
+              </div>
             </div>
           </Card>
+
+          <div className={s.actionRow}>
+            <Button type="submit" disabled={pagoSaving}>
+              {pagoSaving ? "Registrando..." : "Confirmar pago"}
+            </Button>
+            <Button
+              variant="secondary"
+              onClick={() => setVista("lista")}
+              disabled={pagoSaving}
+            >
+              Cancelar
+            </Button>
+          </div>
         </form>
       </Layout>
     );
@@ -729,7 +857,7 @@ export default function Cuotas() {
   // -------------------------------------------------------------
   return (
     <Layout
-      title="Cuotas y pagos › Comprobante de pago"
+      title="Bonos y pagos › Comprobante de pago"
       action={
         <div style={{ display: "flex", gap: "var(--space-4)" }}>
           <Button variant="secondary" onClick={() => window.print()}>
@@ -746,7 +874,7 @@ export default function Cuotas() {
           <div className={s.receiptHeader}>
             <div>
               <div className={s.receiptSchool}>Asociación Cooperadora Escolar</div>
-              <div className={s.receiptSub}>Comprobante oficial de pago de cuota social</div>
+              <div className={s.receiptSub}>Comprobante oficial de bono contribución</div>
             </div>
             <div>
               <div className={s.receiptNumber}>
@@ -767,7 +895,7 @@ export default function Cuotas() {
             </div>
             <div className={s.receiptRow}>
               <span className={s.receiptLabel}>En concepto de:</span>
-              <span className={s.receiptValue}>Cuota Social · Período {reciboSeleccionado.periodo}</span>
+              <span className={s.receiptValue}>{etiquetaConcepto(reciboSeleccionado.concepto)} · Año {reciboSeleccionado.periodo}</span>
             </div>
             <div className={s.receiptRow}>
               <span className={s.receiptLabel}>Medio de pago:</span>
@@ -777,6 +905,12 @@ export default function Cuotas() {
               <span className={s.receiptLabel}>Registrado por:</span>
               <span className={s.receiptValue}>{reciboSeleccionado.registradoPor}</span>
             </div>
+            {reciboSeleccionado.observaciones && (
+              <div className={s.receiptRow}>
+                <span className={s.receiptLabel}>Observaciones:</span>
+                <span className={s.receiptValue} style={{ whiteSpace: "pre-wrap" }}>{reciboSeleccionado.observaciones}</span>
+              </div>
+            )}
 
             <div className={s.receiptTotalRow}>
               <span className={s.receiptTotalLabel}>IMPORTE TOTAL</span>

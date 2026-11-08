@@ -69,9 +69,21 @@ fn one(db: &Connection, sql: &str) -> R<i64> {
 }
 
 fn auditar(db: &Connection, usuario_id: i64, accion: &str, entidad: &str, entidad_id: Option<i64>) -> R<()> {
+    auditar_con_detalle(db, usuario_id, accion, entidad, entidad_id, None)
+}
+
+/// Igual que `auditar`, pero guarda además el detalle del cambio (por ejemplo "Cuenta corriente: 0 → 250000")
+fn auditar_con_detalle(
+    db: &Connection,
+    usuario_id: i64,
+    accion: &str,
+    entidad: &str,
+    entidad_id: Option<i64>,
+    detalle: Option<&str>,
+) -> R<()> {
     db.execute(
-        "INSERT INTO auditoria(usuario_id, accion, entidad, entidad_id) VALUES(?1, ?2, ?3, ?4)",
-        params![usuario_id, accion, entidad, entidad_id],
+        "INSERT INTO auditoria(usuario_id, accion, entidad, entidad_id, detalle) VALUES(?1, ?2, ?3, ?4, ?5)",
+        params![usuario_id, accion, entidad, entidad_id, detalle],
     ).map_err(s)?;
     Ok(())
 }
@@ -85,6 +97,8 @@ pub struct AuditoriaFila {
     pub accion: String,
     pub entidad: String,
     pub entidad_id: Option<i64>,
+    /// Detalle legible del cambio (valores anteriores y nuevos), cuando aplica
+    pub detalle: Option<String>,
 }
 
 #[tauri::command]
@@ -92,13 +106,13 @@ pub fn listar_auditoria(st: State<AppState>) -> R<Vec<AuditoriaFila>> {
     auth_superadmin(&st)?;
     let db = st.db.lock().map_err(s)?;
     let mut stmt = db.prepare(
-        "SELECT a.id, COALESCE(u.nombre, 'Sistema'), a.fecha_hora, a.accion, a.entidad, a.entidad_id
+        "SELECT a.id, COALESCE(u.nombre, 'Sistema'), a.fecha_hora, a.accion, a.entidad, a.entidad_id, a.detalle
          FROM auditoria a LEFT JOIN usuarios u ON u.id=a.usuario_id
          ORDER BY a.id DESC",
     ).map_err(s)?;
     let rows = stmt.query_map([], |r| Ok(AuditoriaFila {
         id: r.get(0)?, usuario: r.get(1)?, fecha_hora: r.get(2)?, accion: r.get(3)?,
-        entidad: r.get(4)?, entidad_id: r.get(5)?,
+        entidad: r.get(4)?, entidad_id: r.get(5)?, detalle: r.get(6)?,
     })).map_err(s)?;
     rows.collect::<Result<Vec<_>, _>>().map_err(s)
 }
@@ -142,9 +156,12 @@ pub struct Movimiento { pub descripcion: String, pub tipo: String, pub monto: i6
 #[serde(rename_all = "camelCase")]
 pub struct ResumenInicio {
     pub saldo_caja: i64,
-    pub cuotas_cobradas: i64,
-    pub cuotas_total: i64,
-    pub con_deuda: i64,
+    /// Bonos anuales del año corriente ya abonados (familias distintas)
+    pub bonos_cobrados: i64,
+    /// Asociados activos: el total de familias a las que se les ofrece el bono
+    pub bonos_total: i64,
+    /// Familias que abonaron los materiales del año corriente
+    pub materiales_cobrados: i64,
     pub proxima_reunion: Option<String>,
     pub ultimos_movimientos: Vec<Movimiento>,
     pub ultima_copia: Option<String>,
@@ -155,9 +172,9 @@ pub fn resumen_inicio(st: State<AppState>) -> R<ResumenInicio> {
     auth(&st)?;
     let db = st.db.lock().map_err(s)?;
     let saldo_caja = one(&db, "SELECT COALESCE(SUM(CASE tipo WHEN 'Ingreso' THEN monto ELSE -monto END),0) FROM movimientos_caja WHERE anulado=0")?;
-    let cuotas_cobradas = one(&db, "SELECT COUNT(DISTINCT asociado_id) FROM pagos WHERE periodo=strftime('%Y-%m','now','localtime')")?;
-    let cuotas_total = one(&db, "SELECT COUNT(*) FROM v_asociados WHERE activo=1 AND exento=0")?;
-    let con_deuda = one(&db, "SELECT COUNT(*) FROM v_asociados WHERE activo=1 AND estado_cuotas='Con deuda'")?;
+    let bonos_cobrados = one(&db, "SELECT COUNT(DISTINCT asociado_id) FROM pagos WHERE anulado=0 AND concepto='BONO_ANUAL' AND substr(periodo,1,4)=strftime('%Y','now','localtime')")?;
+    let bonos_total = one(&db, "SELECT COUNT(*) FROM v_asociados WHERE activo=1")?;
+    let materiales_cobrados = one(&db, "SELECT COUNT(DISTINCT asociado_id) FROM pagos WHERE anulado=0 AND concepto='MATERIALES' AND substr(periodo,1,4)=strftime('%Y','now','localtime')")?;
     let proxima_reunion: Option<String> = db
         .query_row(
             "SELECT strftime('%d/%m',fecha) || ' · ' || tipo FROM reuniones WHERE fecha>=date('now','localtime') ORDER BY fecha LIMIT 1",
@@ -174,12 +191,12 @@ pub fn resumen_inicio(st: State<AppState>) -> R<ResumenInicio> {
         .query_map([], |r| Ok(Movimiento { descripcion: r.get(0)?, tipo: r.get(1)?, monto: r.get(2)? }))
         .map_err(s)?;
     let ultimos_movimientos = rows.collect::<Result<Vec<_>, _>>().map_err(s)?;
-    Ok(ResumenInicio { saldo_caja, cuotas_cobradas, cuotas_total, con_deuda, proxima_reunion, ultimos_movimientos, ultima_copia })
+    Ok(ResumenInicio { saldo_caja, bonos_cobrados, bonos_total, materiales_cobrados, proxima_reunion, ultimos_movimientos, ultima_copia })
 }
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct ResumenPadron { pub activos: i64, pub con_deuda: i64, pub exentos: i64 }
+pub struct ResumenPadron { pub activos: i64, pub colaboraron: i64, pub no_colaboraron: i64 }
 
 #[tauri::command]
 pub fn resumen_padron(st: State<AppState>) -> R<ResumenPadron> {
@@ -187,8 +204,8 @@ pub fn resumen_padron(st: State<AppState>) -> R<ResumenPadron> {
     let db = st.db.lock().map_err(s)?;
     Ok(ResumenPadron {
         activos: one(&db, "SELECT COUNT(*) FROM v_asociados WHERE activo=1")?,
-        con_deuda: one(&db, "SELECT COUNT(*) FROM v_asociados WHERE activo=1 AND estado_cuotas='Con deuda'")?,
-        exentos: one(&db, "SELECT COUNT(*) FROM v_asociados WHERE activo=1 AND exento=1")?,
+        colaboraron: one(&db, "SELECT COUNT(*) FROM v_asociados WHERE activo=1 AND estado_colaboracion='Colaboró'")?,
+        no_colaboraron: one(&db, "SELECT COUNT(*) FROM v_asociados WHERE activo=1 AND estado_colaboracion='No colaboró'")?,
     })
 }
 
@@ -205,13 +222,20 @@ pub struct AsociadoFila {
     pub telefono: Option<String>,
     pub email: Option<String>,
     pub alumnos: Option<String>,
-    pub estado_cuotas: String,
+    pub cantidad_alumnos: i64,
+    pub tiene_hermanos: i64,
+    pub estado_colaboracion: String,
+    /// 1 si la familia abonó el bono de la cooperadora del año corriente
+    pub bono_anual_pagado: i64,
+    /// 1 si la familia abonó el bono de materiales del año corriente
+    pub materiales_pagado: i64,
     pub activo: i64,
     pub tipo_vinculo: String,
+    pub fecha_alta: String,
 }
 
 #[tauri::command]
-pub fn listar_asociados(st: State<AppState>, busqueda: String, estado_cuotas: String, estado: String) -> R<Vec<AsociadoFila>> {
+pub fn listar_asociados(st: State<AppState>, busqueda: String, estado_colaboracion: String, estado: String) -> R<Vec<AsociadoFila>> {
     auth(&st)?;
     let db = st.db.lock().map_err(s)?;
     let activo_cond = match estado.trim() {
@@ -220,21 +244,26 @@ pub fn listar_asociados(st: State<AppState>, busqueda: String, estado_cuotas: St
         _ => "", // "Todos"
     };
     let sql = format!(
-        "SELECT id,apellido_nombre,dni,telefono,email,alumnos,estado_cuotas,activo,tipo_vinculo FROM v_asociados
+        "SELECT id,apellido_nombre,dni,telefono,email,alumnos,cantidad_alumnos,tiene_hermanos,
+                estado_colaboracion,bono_anual_pagado,materiales_pagado,activo,tipo_vinculo,fecha_alta
+         FROM v_asociados
          WHERE (1=1 {})
            AND (?1='' OR apellido_nombre LIKE '%'||?1||'%' OR dni LIKE '%'||?1||'%')
-           AND (?2='Todos' OR estado_cuotas=?2)
+           AND (?2='Todos' OR ?2='' OR estado_colaboracion=?2)
          ORDER BY apellido_nombre",
         activo_cond
     );
     let mut q = db.prepare(&sql).map_err(s)?;
     let rows = q
-        .query_map(params![busqueda.trim(), estado_cuotas], |r| {
+        .query_map(params![busqueda.trim(), estado_colaboracion], |r| {
             Ok(AsociadoFila {
                 id: r.get(0)?, apellido_nombre: r.get(1)?, dni: r.get(2)?,
-                telefono: r.get(3)?, email: r.get(4)?, alumnos: r.get(5)?, estado_cuotas: r.get(6)?,
-                activo: r.get(7)?,
-                tipo_vinculo: r.get(8)?,
+                telefono: r.get(3)?, email: r.get(4)?, alumnos: r.get(5)?,
+                cantidad_alumnos: r.get(6)?, tiene_hermanos: r.get(7)?,
+                estado_colaboracion: r.get(8)?,
+                bono_anual_pagado: r.get(9)?, materiales_pagado: r.get(10)?,
+                activo: r.get(11)?,
+                tipo_vinculo: r.get(12)?, fecha_alta: r.get(13)?,
             })
         })
         .map_err(s)?;
@@ -256,9 +285,14 @@ pub struct AsociadoDetalle {
     pub email: Option<String>,
     pub fecha_alta: String,
     pub alumnos: Option<String>,
+    pub cantidad_alumnos: i64,
     pub lista_alumnos: Vec<AlumnoItem>,
-    pub estado_cuotas: String,
-    pub exento: i64,
+    pub estado_colaboracion: String,
+    /// 1 si la familia abonó el bono anual del año corriente
+    pub bono_anual_pagado: i64,
+    /// 1 si la familia abonó el bono de materiales del año corriente
+    pub materiales_pagado: i64,
+    pub tiene_hermanos: i64,
     pub activo: i64,
     pub tipo_vinculo: String,
 }
@@ -268,12 +302,15 @@ pub fn obtener_asociado(st: State<AppState>, id: i64) -> R<AsociadoDetalle> {
     auth(&st)?;
     let db = st.db.lock().map_err(s)?;
     let detalle = db.query_row(
-        "SELECT id,apellido_nombre,dni,telefono,email,fecha_alta,alumnos,estado_cuotas,exento,activo,tipo_vinculo FROM v_asociados WHERE id=?1",
+        "SELECT id,apellido_nombre,dni,telefono,email,fecha_alta,alumnos,cantidad_alumnos,
+                estado_colaboracion,bono_anual_pagado,materiales_pagado,tiene_hermanos,activo,tipo_vinculo
+         FROM v_asociados WHERE id=?1",
         params![id],
         |r| Ok((
             r.get::<_, i64>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?, r.get::<_, Option<String>>(3)?,
             r.get::<_, Option<String>>(4)?, r.get::<_, String>(5)?, r.get::<_, Option<String>>(6)?,
-            r.get::<_, String>(7)?, r.get::<_, i64>(8)?, r.get::<_, i64>(9)?, r.get::<_, String>(10)?,
+            r.get::<_, i64>(7)?, r.get::<_, String>(8)?, r.get::<_, i64>(9)?,
+            r.get::<_, i64>(10)?, r.get::<_, i64>(11)?, r.get::<_, i64>(12)?, r.get::<_, String>(13)?,
         )),
     )
     .map_err(s)?;
@@ -284,15 +321,17 @@ pub fn obtener_asociado(st: State<AppState>, id: i64) -> R<AsociadoDetalle> {
 
     Ok(AsociadoDetalle {
         id: detalle.0, apellido_nombre: detalle.1, dni: detalle.2, telefono: detalle.3,
-        email: detalle.4, fecha_alta: detalle.5, alumnos: detalle.6, lista_alumnos,
-        estado_cuotas: detalle.7, exento: detalle.8, activo: detalle.9, tipo_vinculo: detalle.10,
+        email: detalle.4, fecha_alta: detalle.5, alumnos: detalle.6, cantidad_alumnos: detalle.7,
+        lista_alumnos, estado_colaboracion: detalle.8,
+        bono_anual_pagado: detalle.9, materiales_pagado: detalle.10,
+        tiene_hermanos: detalle.11, activo: detalle.12, tipo_vinculo: detalle.13,
     })
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Clone)]
 pub struct NuevoAlumno { pub nombre: String, pub curso: String }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct DatosAsociado {
     pub apellido_nombre: String,
@@ -301,16 +340,52 @@ pub struct DatosAsociado {
     pub email: Option<String>,
     pub alumnos: Vec<NuevoAlumno>,
     pub tipo_vinculo: String,
+    /// Fecha de alta (AAAA-MM-DD). Si se omite en el alta se usa la del día;
+    /// en la edición, omitirla conserva la fecha ya registrada.
+    #[serde(default)]
+    pub fecha_alta: Option<String>,
 }
 
-#[tauri::command]
-pub fn crear_asociado(st: State<AppState>, datos: DatosAsociado) -> R<i64> {
-    let u = auth_secretaria_presidente_o_admin(&st)?;
-    let mut db = st.db.lock().map_err(s)?;
+/// La condición de hermanos no se carga a mano: se deriva de la cantidad de alumnos
+/// vinculados (dos o más) y habilita la tarifa "con hermanos" del bono.
+pub fn sincronizar_tiene_hermanos(tx: &rusqlite::Transaction, asociado_id: i64) -> R<()> {
+    tx.execute(
+        "UPDATE asociados SET tiene_hermanos =
+           CASE WHEN (SELECT COUNT(*) FROM alumnos WHERE asociado_id = ?1) > 1 THEN 1 ELSE 0 END
+         WHERE id = ?1",
+        params![asociado_id],
+    )
+    .map_err(s)?;
+    Ok(())
+}
+
+/// Valida la fecha de alta (AAAA-MM-DD real y no futura) y la devuelve normalizada.
+/// `None` significa "no informada": el alta usa hoy y la edición conserva la existente.
+pub fn normalizar_fecha_alta(db: &Connection, valor: Option<&str>) -> R<Option<String>> {
+    let Some(fecha) = valor.map(str::trim).filter(|f| !f.is_empty()) else {
+        return Ok(None);
+    };
+    let (valida, futura): (bool, bool) = db
+        .query_row("SELECT date(?1) IS ?1, ?1 > date('now','localtime')", params![fecha], |r| {
+            Ok((r.get(0)?, r.get(1)?))
+        })
+        .map_err(s)?;
+    if !valida {
+        return Err("La fecha de alta no es válida: usá el formato AAAA-MM-DD".to_string());
+    }
+    if futura {
+        return Err("La fecha de alta no puede ser posterior a hoy".to_string());
+    }
+    Ok(Some(fecha.to_string()))
+}
+
+pub fn crear_asociado_interno(db: &mut Connection, datos: &DatosAsociado) -> R<i64> {
+    let fecha_alta = normalizar_fecha_alta(db, datos.fecha_alta.as_deref())?;
     let tx = db.transaction().map_err(s)?;
     tx.execute(
-        "INSERT INTO asociados(apellido_nombre,dni,telefono,email,tipo_vinculo) VALUES(?1,?2,?3,?4,?5)",
-        params![datos.apellido_nombre.trim(), datos.dni.trim(), datos.telefono, datos.email, datos.tipo_vinculo],
+        "INSERT INTO asociados(apellido_nombre,dni,telefono,email,tipo_vinculo,fecha_alta,tiene_hermanos)
+         VALUES(?1,?2,?3,?4,?5,COALESCE(?6, date('now','localtime')),0)",
+        params![datos.apellido_nombre.trim(), datos.dni.trim(), datos.telefono, datos.email, datos.tipo_vinculo, fecha_alta],
     )
     .map_err(s)?;
     let id = tx.last_insert_rowid();
@@ -319,16 +394,27 @@ pub fn crear_asociado(st: State<AppState>, datos: DatosAsociado) -> R<i64> {
             tx.execute("INSERT INTO alumnos(asociado_id,nombre,curso) VALUES(?1,?2,?3)", params![id, a.nombre.trim(), a.curso.trim()]).map_err(s)?;
         }
     }
+    sincronizar_tiene_hermanos(&tx, id)?;
     tx.commit().map_err(s)?;
+    Ok(id)
+}
+
+#[tauri::command]
+pub fn crear_asociado(st: State<AppState>, datos: DatosAsociado) -> R<i64> {
+    let u = auth_secretaria_presidente_o_admin(&st)?;
+    let mut db = st.db.lock().map_err(s)?;
+    let id = crear_asociado_interno(&mut db, &datos)?;
     auditar(&db, u.id, "CREAR", "asociado", Some(id))?;
     Ok(id)
 }
 
 pub fn actualizar_asociado_interno(db: &mut Connection, id: i64, datos: &DatosAsociado) -> R<()> {
+    let fecha_alta = normalizar_fecha_alta(db, datos.fecha_alta.as_deref())?;
     let tx = db.transaction().map_err(s)?;
     tx.execute(
-        "UPDATE asociados SET apellido_nombre=?1,dni=?2,telefono=?3,email=?4,tipo_vinculo=?5 WHERE id=?6",
-        params![datos.apellido_nombre.trim(), datos.dni.trim(), datos.telefono, datos.email, datos.tipo_vinculo, id],
+        "UPDATE asociados SET apellido_nombre=?1,dni=?2,telefono=?3,email=?4,tipo_vinculo=?5,
+                fecha_alta=COALESCE(?6, fecha_alta) WHERE id=?7",
+        params![datos.apellido_nombre.trim(), datos.dni.trim(), datos.telefono, datos.email, datos.tipo_vinculo, fecha_alta, id],
     )
     .map_err(s)?;
     // Mantener sincronizada la nómina de autoridades en caso de que este asociado integre la comisión directiva
@@ -342,6 +428,7 @@ pub fn actualizar_asociado_interno(db: &mut Connection, id: i64, datos: &DatosAs
             tx.execute("INSERT INTO alumnos(asociado_id,nombre,curso) VALUES(?1,?2,?3)", params![id, a.nombre.trim(), a.curso.trim()]).map_err(s)?;
         }
     }
+    sincronizar_tiene_hermanos(&tx, id)?;
     tx.commit().map_err(s)
 }
 
@@ -351,15 +438,6 @@ pub fn actualizar_asociado(st: State<AppState>, id: i64, datos: DatosAsociado) -
     let mut db = st.db.lock().map_err(s)?;
     actualizar_asociado_interno(&mut db, id, &datos)?;
     auditar(&db, u.id, "ACTUALIZAR", "asociado", Some(id))
-}
-
-#[tauri::command]
-pub fn marcar_exento(st: State<AppState>, id: i64, exento: bool) -> R<()> {
-    let u = auth_secretaria_presidente_o_admin(&st)?;
-    let db = st.db.lock().map_err(s)?;
-    db.execute("UPDATE asociados SET exento=?1 WHERE id=?2", params![exento as i64, id]).map_err(s)?;
-    auditar(&db, u.id, if exento { "MARCAR_EXENTO" } else { "QUITAR_EXENTO" }, "asociado", Some(id))?;
-    Ok(())
 }
 
 #[tauri::command]
@@ -414,6 +492,8 @@ pub struct PagoFila {
     pub apellido_nombre: String,
     pub dni: String,
     pub periodo: String,
+    /// BONO_ANUAL | MATERIALES (CUOTA_MENSUAL sólo en registros históricos)
+    pub concepto: String,
     pub fecha_pago: String,
     pub monto: i64,
     pub medio: String,
@@ -423,34 +503,40 @@ pub struct PagoFila {
     pub registrado_por_nombre: Option<String>,
     pub movimiento_id: Option<i64>,
     pub adjunto_nombre: Option<String>,
+    /// Nota libre cargada al registrar el bono
+    pub observaciones: Option<String>,
 }
 
 #[tauri::command]
-pub fn listar_pagos(st: State<AppState>, busqueda: String, periodo: String) -> R<Vec<PagoFila>> {
+pub fn listar_pagos(st: State<AppState>, busqueda: String, anio: String, concepto: String) -> R<Vec<PagoFila>> {
     auth(&st)?;
     let db = st.db.lock().map_err(s)?;
     let mut q = db.prepare(
-        "SELECT p.id, p.asociado_id, a.apellido_nombre, a.dni, p.periodo, p.fecha_pago, p.monto, p.medio, p.comprobante, u.nombre, u.rol, p.movimiento_id, m.adjunto_nombre
+        "SELECT p.id, p.asociado_id, a.apellido_nombre, a.dni, p.periodo, p.concepto, p.fecha_pago, p.monto, p.medio,
+                p.comprobante, u.nombre, u.rol, p.movimiento_id, m.adjunto_nombre, p.observaciones
          FROM pagos p
          JOIN asociados a ON a.id = p.asociado_id
          JOIN usuarios u ON u.id = p.registrado_por
          LEFT JOIN movimientos_caja m ON m.id = p.movimiento_id
          WHERE (?1 = '' OR a.apellido_nombre LIKE '%'||?1||'%' OR a.dni LIKE '%'||?1||'%' OR p.comprobante LIKE '%'||?1||'%')
            AND (?2 = 'Todos' OR ?2 = '' OR p.periodo = ?2)
+           AND (?3 = 'Todos' OR ?3 = '' OR p.concepto = ?3)
          ORDER BY p.fecha_pago DESC, p.id DESC",
     ).map_err(s)?;
-    let rows = q.query_map(params![busqueda.trim(), periodo.trim()], |r| {
-        let nombre: String = r.get(9)?;
-        let rol: String = r.get(10)?;
+    let rows = q.query_map(params![busqueda.trim(), anio.trim(), concepto.trim()], |r| {
+        let nombre: String = r.get(10)?;
+        let rol: String = r.get(11)?;
         Ok(PagoFila {
             id: r.get(0)?, asociado_id: r.get(1)?, apellido_nombre: r.get(2)?, dni: r.get(3)?,
-            periodo: r.get(4)?, fecha_pago: r.get(5)?, monto: r.get(6)?, medio: r.get(7)?,
-            comprobante: r.get(8)?,
+            periodo: r.get(4)?, concepto: r.get(5)?,
+            fecha_pago: r.get(6)?, monto: r.get(7)?, medio: r.get(8)?,
+            comprobante: r.get(9)?,
             registrado_por: format!("{} ({})", rol, nombre),
             registrado_por_rol: Some(rol),
             registrado_por_nombre: Some(nombre),
-            movimiento_id: r.get(11)?,
-            adjunto_nombre: r.get(12)?,
+            movimiento_id: r.get(12)?,
+            adjunto_nombre: r.get(13)?,
+            observaciones: r.get(14)?,
         })
     }).map_err(s)?;
     let v = rows.collect::<Result<Vec<_>, _>>().map_err(s)?;
@@ -462,7 +548,8 @@ pub fn obtener_historial_pagos_asociado(st: State<AppState>, asociado_id: i64) -
     auth(&st)?;
     let db = st.db.lock().map_err(s)?;
     let mut q = db.prepare(
-        "SELECT p.id, p.asociado_id, a.apellido_nombre, a.dni, p.periodo, p.fecha_pago, p.monto, p.medio, p.comprobante, u.nombre, u.rol, p.movimiento_id, m.adjunto_nombre
+        "SELECT p.id, p.asociado_id, a.apellido_nombre, a.dni, p.periodo, p.concepto, p.fecha_pago, p.monto, p.medio,
+                p.comprobante, u.nombre, u.rol, p.movimiento_id, m.adjunto_nombre, p.observaciones
          FROM pagos p
          JOIN asociados a ON a.id = p.asociado_id
          JOIN usuarios u ON u.id = p.registrado_por
@@ -471,17 +558,19 @@ pub fn obtener_historial_pagos_asociado(st: State<AppState>, asociado_id: i64) -
          ORDER BY p.periodo DESC, p.fecha_pago DESC",
     ).map_err(s)?;
     let rows = q.query_map(params![asociado_id], |r| {
-        let nombre: String = r.get(9)?;
-        let rol: String = r.get(10)?;
+        let nombre: String = r.get(10)?;
+        let rol: String = r.get(11)?;
         Ok(PagoFila {
             id: r.get(0)?, asociado_id: r.get(1)?, apellido_nombre: r.get(2)?, dni: r.get(3)?,
-            periodo: r.get(4)?, fecha_pago: r.get(5)?, monto: r.get(6)?, medio: r.get(7)?,
-            comprobante: r.get(8)?,
+            periodo: r.get(4)?, concepto: r.get(5)?,
+            fecha_pago: r.get(6)?, monto: r.get(7)?, medio: r.get(8)?,
+            comprobante: r.get(9)?,
             registrado_por: format!("{} ({})", rol, nombre),
             registrado_por_rol: Some(rol),
             registrado_por_nombre: Some(nombre),
-            movimiento_id: r.get(11)?,
-            adjunto_nombre: r.get(12)?,
+            movimiento_id: r.get(12)?,
+            adjunto_nombre: r.get(13)?,
+            observaciones: r.get(14)?,
         })
     }).map_err(s)?;
     let v = rows.collect::<Result<Vec<_>, _>>().map_err(s)?;
@@ -492,63 +581,96 @@ pub fn obtener_historial_pagos_asociado(st: State<AppState>, asociado_id: i64) -
 #[serde(rename_all = "camelCase")]
 pub struct DatosPago {
     pub asociado_id: i64,
+    /// Año lectivo del bono: el corriente o el entrante (se puede pagar en 2026 el ciclo 2027)
     pub periodo: String,
+    /// BONO_ANUAL | MATERIALES
+    pub concepto: String,
     pub monto: i64,
     pub medio: String,
     pub comprobante: Option<String>,
     pub adjunto_nombre: Option<String>,
     pub adjunto_datos: Option<String>,
+    /// Nota libre del cobro (quién entregó el dinero, aclaraciones, etc.)
+    #[serde(default)]
+    pub observaciones: Option<String>,
+}
+
+/// Concepto: bono contribución anual (por familia y por año)
+pub const CONCEPTO_BONO_ANUAL: &str = "BONO_ANUAL";
+/// Concepto: bono contribución de materiales (por alumno)
+pub const CONCEPTO_MATERIALES: &str = "MATERIALES";
+
+/// Etiqueta legible del concepto para recibos y descripciones de caja
+pub fn etiqueta_concepto(concepto: &str) -> &'static str {
+    match concepto {
+        CONCEPTO_BONO_ANUAL => "Bono contribución anual",
+        CONCEPTO_MATERIALES => "Bono contribución materiales",
+        _ => "Cuota social",
+    }
 }
 
 pub fn registrar_pago_interno(db: &mut Connection, datos: &DatosPago, usuario_id: i64) -> R<i64> {
     if datos.monto <= 0 {
-        return Err("El monto de la cuota debe ser mayor a 0".to_string());
+        return Err("El monto del bono contribución debe ser mayor a 0".to_string());
+    }
+
+    let concepto = datos.concepto.trim().to_uppercase();
+    if concepto != CONCEPTO_BONO_ANUAL && concepto != CONCEPTO_MATERIALES {
+        return Err("El concepto debe ser el bono contribución anual o el de materiales".to_string());
+    }
+
+    let anio = datos.periodo.trim();
+    if anio.len() != 4 || !anio.chars().all(|c| c.is_ascii_digit()) {
+        return Err("El año del bono debe tener 4 dígitos (por ejemplo 2026 o 2027)".to_string());
     }
 
     let tx = db.transaction().map_err(s)?;
 
-    // Validar que no se cobre dos veces el mismo período para el mismo asociado
+    // El bono es colaborativo y se abona una vez por concepto y año lectivo
     let ya_pagado: bool = tx.query_row(
-        "SELECT COUNT(*) FROM pagos WHERE asociado_id=?1 AND periodo=?2 AND anulado=0",
-        params![datos.asociado_id, datos.periodo.trim()],
+        "SELECT COUNT(*) FROM pagos WHERE asociado_id=?1 AND concepto=?2 AND periodo=?3 AND anulado=0",
+        params![datos.asociado_id, concepto, anio],
         |r| r.get::<_, i64>(0),
     ).map_err(s)? > 0;
 
     if ya_pagado {
-        return Err(format!("El asociado ya cuenta con un pago registrado para el período {}.", datos.periodo.trim()));
+        return Err(format!(
+            "El asociado ya tiene registrado el {} del año {}.",
+            etiqueta_concepto(&concepto).to_lowercase(),
+            anio
+        ));
     }
 
     let asociado_nombre: String = tx.query_row("SELECT apellido_nombre FROM asociados WHERE id=?1", params![datos.asociado_id], |r| r.get(0)).map_err(s)?;
-    
-    // Formatear período legible: "2026-10" -> "Mes 10/26", "2026" -> "Anual 2026"
-    let periodo_fmt = if datos.periodo.len() == 7 && datos.periodo.contains('-') {
-        let parts: Vec<&str> = datos.periodo.split('-').collect();
-        if parts.len() == 2 && parts[0].len() == 4 && parts[1].len() == 2 {
-            let yy = &parts[0][2..];
-            let mm = parts[1];
-            format!("Mes {}/{}", mm, yy)
-        } else {
-            datos.periodo.clone()
-        }
-    } else if datos.periodo.len() == 4 {
-        format!("Anual {}", datos.periodo)
+
+    // Los materiales se cobran por alumno: el recibo deja constancia de cuántos son
+    let detalle_alumnos = if concepto == CONCEPTO_MATERIALES {
+        let cantidad: i64 = tx
+            .query_row("SELECT COUNT(*) FROM alumnos WHERE asociado_id=?1", params![datos.asociado_id], |r| r.get(0))
+            .map_err(s)?;
+        format!(" ({} {})", cantidad.max(1), if cantidad == 1 { "alumno" } else { "alumnos" })
     } else {
-        datos.periodo.clone()
+        String::new()
     };
 
-    let desc = format!("Asociado N° {} - {}\n{}", datos.asociado_id, periodo_fmt, asociado_nombre);
+    let desc = format!(
+        "Asociado N° {} - {} {}{}\n{}",
+        datos.asociado_id, etiqueta_concepto(&concepto), anio, detalle_alumnos, asociado_nombre
+    );
 
-    // 1. Crear movimiento en caja automático
+    // 1. Crear movimiento en caja automático (el bono se asienta como "Cuota Social",
+    //    que es la categoría con la que debe figurar en la rendición de cuentas)
     tx.execute(
-        "INSERT INTO movimientos_caja(fecha, tipo, categoria, descripcion, monto, comprobante, adjunto_nombre, adjunto_datos, registrado_por, registrado_en) VALUES(date('now','localtime'), 'Ingreso', 'Cuotas', ?1, ?2, ?3, ?4, ?5, ?6, datetime('now','localtime'))",
+        "INSERT INTO movimientos_caja(fecha, tipo, categoria, descripcion, monto, comprobante, adjunto_nombre, adjunto_datos, registrado_por, registrado_en) VALUES(date('now','localtime'), 'Ingreso', 'Cuota Social', ?1, ?2, ?3, ?4, ?5, ?6, datetime('now','localtime'))",
         params![desc, datos.monto, datos.comprobante, datos.adjunto_nombre, datos.adjunto_datos, usuario_id],
     ).map_err(s)?;
     let mov_id = tx.last_insert_rowid();
 
-    // 2. Registrar pago
+    // 2. Registrar pago (con la nota libre del cobro, si la hubiera)
+    let observaciones = datos.observaciones.as_deref().map(str::trim).filter(|o| !o.is_empty());
     tx.execute(
-        "INSERT INTO pagos(asociado_id, periodo, fecha_pago, monto, medio, comprobante, anulado, registrado_por, movimiento_id) VALUES(?1, ?2, date('now','localtime'), ?3, ?4, ?5, 0, ?6, ?7)",
-        params![datos.asociado_id, datos.periodo.trim(), datos.monto, datos.medio.trim(), datos.comprobante, usuario_id, mov_id],
+        "INSERT INTO pagos(asociado_id, periodo, concepto, fecha_pago, monto, medio, comprobante, observaciones, anulado, registrado_por, movimiento_id) VALUES(?1, ?2, ?3, date('now','localtime'), ?4, ?5, ?6, ?7, 0, ?8, ?9)",
+        params![datos.asociado_id, anio, concepto, datos.monto, datos.medio.trim(), datos.comprobante, observaciones, usuario_id, mov_id],
     ).map_err(s)?;
     let pago_id = tx.last_insert_rowid();
 
@@ -589,6 +711,9 @@ pub struct MovimientoCajaFila {
     pub registrado_por: Option<String>,
     /// Fecha y hora en que se cargó en el sistema; `fecha` es la fecha real de la operación
     pub registrado_en: Option<String>,
+    /// "A" | "B" para los ingresos cargados como "Otros": en el acta se suman en
+    /// "3. Otros ingresos / subsidios" a) o b), conservando el detalle de la categoría.
+    pub grupo_otros: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -606,7 +731,7 @@ pub fn listar_movimientos_caja(st: State<AppState>, tipo: String, categoria: Str
     let db = st.db.lock().map_err(s)?;
     let mut q = db.prepare(
         "SELECT m.id, m.fecha, m.tipo, m.categoria, m.descripcion, m.monto, m.comprobante, m.anulado, m.motivo_anulacion,
-                m.adjunto_nombre, u.rol || ' (' || u.nombre || ')', m.registrado_en
+                m.adjunto_nombre, u.rol || ' (' || u.nombre || ')', m.registrado_en, m.grupo_otros
          FROM movimientos_caja m
          LEFT JOIN usuarios u ON u.id = m.registrado_por
          WHERE (?1 = 'Todos' OR m.tipo = ?1)
@@ -619,7 +744,7 @@ pub fn listar_movimientos_caja(st: State<AppState>, tipo: String, categoria: Str
             id: r.get(0)?, fecha: r.get(1)?, tipo: r.get(2)?, categoria: r.get(3)?,
             descripcion: r.get(4)?, monto: r.get(5)?, comprobante: r.get(6)?, anulado: r.get(7)?,
             motivo_anulacion: r.get(8)?, adjunto_nombre: r.get(9)?, registrado_por: r.get(10)?,
-            registrado_en: r.get(11)?,
+            registrado_en: r.get(11)?, grupo_otros: r.get(12)?,
         })
     }).map_err(s)?;
     let v = rows.collect::<Result<Vec<_>, _>>().map_err(s)?;
@@ -650,6 +775,9 @@ pub struct DatosMovimientoCaja {
     pub adjunto_datos: Option<String>,
     /// Fecha real de la operación (AAAA-MM-DD); si no viene se toma la del día
     pub fecha: Option<String>,
+    /// Para ingresos cargados en "Otros": "A" o "B" (renglón del acta donde se suman)
+    #[serde(default)]
+    pub grupo_otros: Option<String>,
 }
 
 /// RNF08: límite de 10 MB por archivo adjunto
@@ -682,11 +810,20 @@ pub fn crear_movimiento_caja_interno(db: &Connection, datos: &DatosMovimientoCaj
             return Err("La fecha del movimiento no puede ser posterior a hoy".to_string());
         }
     }
+    // "Otros" ingresos se clasifican en a) o b) para el cuadro del acta; el resto no lleva grupo
+    let grupo_otros = match datos.grupo_otros.as_deref().map(str::trim).map(str::to_uppercase).as_deref() {
+        None | Some("") => None,
+        Some("A") => Some("A".to_string()),
+        Some("B") => Some("B".to_string()),
+        Some(_) => return Err("El grupo de otros ingresos debe ser a) o b)".to_string()),
+    };
+    let grupo_otros = if datos.tipo.trim() == "Ingreso" { grupo_otros } else { None };
+
     db.execute(
-        "INSERT INTO movimientos_caja(fecha, tipo, categoria, descripcion, monto, comprobante, adjunto_nombre, adjunto_datos, registrado_por, registrado_en)
-         VALUES(COALESCE(?9, date('now','localtime')), ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, datetime('now','localtime'))",
+        "INSERT INTO movimientos_caja(fecha, tipo, categoria, descripcion, monto, comprobante, adjunto_nombre, adjunto_datos, registrado_por, registrado_en, grupo_otros)
+         VALUES(COALESCE(?9, date('now','localtime')), ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, datetime('now','localtime'), ?10)",
         params![datos.tipo, datos.categoria.trim(), datos.descripcion.trim(), datos.monto, datos.comprobante,
-                datos.adjunto_nombre, datos.adjunto_datos, usuario_id, fecha],
+                datos.adjunto_nombre, datos.adjunto_datos, usuario_id, fecha, grupo_otros],
     ).map_err(s)?;
     Ok(db.last_insert_rowid())
 }
@@ -939,9 +1076,40 @@ pub fn guardar_acta_detallada(st: State<AppState>, datos: GuardarActaDetallada) 
     }
 
     tx.commit().map_err(s)?;
+
+    // Si el acta ya está firmada, lo fijado impacta enseguida en la configuración
+    let estado_acta: String = db
+        .query_row("SELECT estado FROM actas WHERE id=?1", params![id], |r| r.get(0))
+        .map_err(s)?;
+    if estado_acta == "Firmada" {
+        aplicar_valores_acta(&db, id)?;
+    }
+
     auditar(&db, u.id, "GUARDAR", "acta", Some(id))?;
     drop(db);
     listar_actas(st).and_then(|items| items.into_iter().find(|a| a.id == id).ok_or_else(|| "No se pudo recuperar el acta guardada".to_string()))
+}
+
+/// Lo fijado en el acta de asamblea impacta en la configuración de la cooperadora:
+/// la cuota social pasa a ser el Bono Contribución Anual y la caja chica su monto aprobado.
+pub fn aplicar_valores_acta(db: &Connection, id: i64) -> R<()> {
+    let (cuota_social, caja_chica): (i64, i64) = db.query_row(
+        "SELECT cuota_social, caja_chica FROM actas WHERE id=?1",
+        params![id],
+        |r| Ok((r.get(0)?, r.get(1)?)),
+    ).map_err(|_| "El acta no existe".to_string())?;
+
+    db.execute(
+        "INSERT INTO configuracion(clave, valor) VALUES('bono_anual', ?1)
+         ON CONFLICT(clave) DO UPDATE SET valor=?1",
+        params![cuota_social.to_string()],
+    ).map_err(s)?;
+    db.execute(
+        "INSERT INTO configuracion(clave, valor) VALUES('caja_chica', ?1)
+         ON CONFLICT(clave) DO UPDATE SET valor=?1",
+        params![caja_chica.to_string()],
+    ).map_err(s)?;
+    Ok(())
 }
 
 #[tauri::command]
@@ -955,6 +1123,7 @@ pub fn aprobar_acta(st: State<AppState>, id: i64) -> R<()> {
     if updated == 0 {
         return Err("El acta no existe o ya fue aprobada".to_string());
     }
+    aplicar_valores_acta(&db, id)?;
     auditar(&db, u.id, "APROBAR", "acta", Some(id))
 }
 
@@ -977,6 +1146,82 @@ pub fn eliminar_acta(st: State<AppState>, id: i64) -> R<()> {
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct SaldoEjercicioAnterior {
+    /// Importe sugerido para "Saldo ejercicio anterior"
+    pub saldo: i64,
+    /// "acta" | "caja" | "sin_datos"
+    pub origen: String,
+    /// Explicación del origen, para mostrarle al usuario de dónde salió el número
+    pub detalle: String,
+}
+
+/// Saldo con el que arranca el ejercicio que comienza en `desde` (AAAA-MM-DD):
+/// 1) el "Saldo próximo ejercicio" del acta del ejercicio anterior (documento aprobado);
+/// 2) si no hay acta, el acumulado de caja anterior a `desde`;
+/// 3) si tampoco hay movimientos, sin datos: queda la carga manual en el acta.
+pub fn saldo_ejercicio_anterior_interno(db: &Connection, desde: &str) -> R<SaldoEjercicioAnterior> {
+    let anio = desde.get(0..4).unwrap_or("").to_string();
+    let acta: Option<(String, String, String)> = db
+        .query_row(
+            "SELECT numero, foja, cuadro_financiero FROM actas
+             WHERE tipo = 'Asamblea Anual Ordinaria' AND periodo_hasta = ?1
+             ORDER BY fecha_asamblea DESC, id DESC LIMIT 1",
+            params![anio],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        )
+        .optional()
+        .map_err(s)?;
+
+    if let Some((numero, foja, cuadro)) = acta {
+        let json: serde_json::Value =
+            serde_json::from_str(&cuadro).unwrap_or_else(|_| serde_json::json!({}));
+        let valor = json
+            .get("saldoProximoEjercicio")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        let digitos: String = valor.chars().filter(|c| c.is_ascii_digit()).collect();
+        if !digitos.is_empty() {
+            return Ok(SaldoEjercicioAnterior {
+                saldo: digitos.parse().unwrap_or(0),
+                origen: "acta".to_string(),
+                detalle: format!("Saldo próximo ejercicio del acta N° {} (foja {})", numero, foja),
+            });
+        }
+    }
+
+    let (acumulado, movimientos): (i64, i64) = db
+        .query_row(
+            "SELECT COALESCE(SUM(CASE tipo WHEN 'Ingreso' THEN monto ELSE -monto END), 0), COUNT(*)
+             FROM movimientos_caja WHERE anulado = 0 AND fecha < ?1",
+            params![desde],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .map_err(s)?;
+
+    if movimientos > 0 {
+        return Ok(SaldoEjercicioAnterior {
+            saldo: acumulado,
+            origen: "caja".to_string(),
+            detalle: format!("Acumulado de caja anterior al {} (no incluye saldos en banco)", desde),
+        });
+    }
+
+    Ok(SaldoEjercicioAnterior {
+        saldo: 0,
+        origen: "sin_datos".to_string(),
+        detalle: "No hay ejercicio anterior registrado: ingresá el saldo de la última acta en papel".to_string(),
+    })
+}
+
+#[tauri::command]
+pub fn saldo_ejercicio_anterior(st: State<AppState>, desde: String) -> R<SaldoEjercicioAnterior> {
+    auth(&st)?;
+    let db = st.db.lock().map_err(s)?;
+    saldo_ejercicio_anterior_interno(&db, desde.trim())
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct RendicionFila {
     pub id: i64,
     pub periodo: String,
@@ -987,6 +1232,8 @@ pub struct RendicionFila {
     pub estado: String,
     pub aprobada_por: Option<String>,
     pub aprobada_en: Option<String>,
+    /// Última vez que el detalle aprobado se recalculó por cambios en la caja del período
+    pub actualizada_en: Option<String>,
     pub total_ingresos: i64,
     pub total_egresos: i64,
     pub saldo_periodo: i64,
@@ -1002,41 +1249,39 @@ struct RendicionSnapshot {
 pub fn listar_rendiciones(st: State<AppState>) -> R<Vec<RendicionFila>> {
     auth(&st)?;
     let db = st.db.lock().map_err(s)?;
+
+    // Antes de listar, se recalculan las rendiciones aprobadas: si la caja del período
+    // cambió, se guarda el nuevo detalle y se registra la fecha de actualización.
+    let aprobadas: Vec<i64> = {
+        let mut q = db.prepare("SELECT id FROM rendiciones WHERE estado='Aprobada'").map_err(s)?;
+        let filas = q.query_map([], |r| r.get::<_, i64>(0)).map_err(s)?;
+        filas.collect::<Result<Vec<_>, _>>().map_err(s)?
+    };
+    for id in aprobadas {
+        let _ = refrescar_rendicion_aprobada(&db, id);
+    }
+
+    // Los totales se calculan siempre desde la caja del período (no desde el snapshot)
     let mut q = db.prepare(
-        "SELECT r.id, r.periodo, r.desde, r.hasta, r.generada_en, u1.nombre, r.estado, u2.nombre, r.aprobada_en,
-                r.snapshot
+        "SELECT r.id, r.periodo, r.desde, r.hasta, r.generada_en, u1.nombre, r.estado, u2.nombre,
+                r.aprobada_en, r.actualizada_en,
+                COALESCE((SELECT SUM(monto) FROM movimientos_caja
+                          WHERE tipo='Ingreso' AND anulado=0 AND fecha BETWEEN r.desde AND r.hasta), 0),
+                COALESCE((SELECT SUM(monto) FROM movimientos_caja
+                          WHERE tipo='Egreso' AND anulado=0 AND fecha BETWEEN r.desde AND r.hasta), 0)
          FROM rendiciones r
          JOIN usuarios u1 ON u1.id = r.generada_por
          LEFT JOIN usuarios u2 ON u2.id = r.aprobada_por
          ORDER BY r.desde DESC, r.id DESC",
     ).map_err(s)?;
     let rows = q.query_map([], |r| {
-        let snapshot: Option<String> = r.get(9)?;
-        let (ing, egr) = snapshot
-            .as_deref()
-            .and_then(|json| serde_json::from_str::<RendicionSnapshot>(json).ok())
-            .map(|s| (
-                s.lineas.iter().filter(|l| l.tipo == "Ingreso").map(|l| l.total).sum(),
-                s.lineas.iter().filter(|l| l.tipo == "Egreso").map(|l| l.total).sum(),
-            ))
-            .unwrap_or_else(|| {
-                let desde: String = r.get(2).unwrap_or_default();
-                let hasta: String = r.get(3).unwrap_or_default();
-                let ing = db.query_row(
-                    "SELECT COALESCE(SUM(monto),0) FROM movimientos_caja WHERE tipo='Ingreso' AND anulado=0 AND fecha BETWEEN ?1 AND ?2",
-                    params![desde, hasta], |row| row.get(0),
-                ).unwrap_or(0);
-                let egr = db.query_row(
-                    "SELECT COALESCE(SUM(monto),0) FROM movimientos_caja WHERE tipo='Egreso' AND anulado=0 AND fecha BETWEEN ?1 AND ?2",
-                    params![desde, hasta], |row| row.get(0),
-                ).unwrap_or(0);
-                (ing, egr)
-            });
+        let ing: i64 = r.get(10)?;
+        let egr: i64 = r.get(11)?;
         Ok(RendicionFila {
             id: r.get(0)?, periodo: r.get(1)?, desde: r.get(2)?, hasta: r.get(3)?,
             generada_en: r.get(4)?, generada_por: r.get(5)?, estado: r.get(6)?,
-            aprobada_por: r.get(7)?, aprobada_en: r.get(8)?, total_ingresos: ing,
-            total_egresos: egr, saldo_periodo: ing - egr,
+            aprobada_por: r.get(7)?, aprobada_en: r.get(8)?, actualizada_en: r.get(9)?,
+            total_ingresos: ing, total_egresos: egr, saldo_periodo: ing - egr,
         })
     }).map_err(s)?;
     let v = rows.collect::<Result<Vec<_>, _>>().map_err(s)?;
@@ -1049,19 +1294,34 @@ pub struct LineaRendicion {
     pub tipo: String,
     pub categoria: String,
     pub total: i64,
+    /// "A" | "B" cuando la categoría es un "Otro ingreso" clasificado para el acta
+    #[serde(default)]
+    pub grupo: Option<String>,
 }
 
-fn snapshot_de_rendicion(db: &Connection, id: i64) -> R<Option<RendicionSnapshot>> {
+/// Vuelve a calcular el detalle de una rendición aprobada con los movimientos actuales del
+/// período. Si el resultado cambió, guarda el nuevo snapshot y registra la fecha de actualización.
+pub fn refrescar_rendicion_aprobada(db: &Connection, id: i64) -> R<bool> {
     let (estado, snapshot): (String, Option<String>) = db.query_row(
         "SELECT estado, snapshot FROM rendiciones WHERE id=?1", params![id],
         |r| Ok((r.get(0)?, r.get(1)?)),
     ).map_err(|_| "La rendición de cuentas no existe".to_string())?;
     if estado != "Aprobada" {
-        return Ok(None);
+        return Ok(false);
     }
-    snapshot
-        .map(|json| serde_json::from_str(&json).map_err(s))
-        .transpose()
+    let actual = RendicionSnapshot {
+        lineas: detalle_rendicion_actual(db, id)?,
+        meses: detalle_mensual_rendicion_actual(db, id)?,
+    };
+    let json = serde_json::to_string(&actual).map_err(s)?;
+    if snapshot.as_deref() == Some(json.as_str()) {
+        return Ok(false);
+    }
+    db.execute(
+        "UPDATE rendiciones SET snapshot=?1, actualizada_en=datetime('now','localtime') WHERE id=?2",
+        params![json, id],
+    ).map_err(s)?;
+    Ok(true)
 }
 
 /// Totales por tipo y categoría de los movimientos no anulados del período de la rendición
@@ -1073,23 +1333,20 @@ pub fn detalle_rendicion_actual(db: &Connection, id: i64) -> R<Vec<LineaRendicio
     ).map_err(|_| "La rendición de cuentas no existe".to_string())?;
 
     let mut q = db.prepare(
-        "SELECT tipo, categoria, SUM(monto)
+        "SELECT tipo, categoria, SUM(monto), grupo_otros
          FROM movimientos_caja
          WHERE anulado=0 AND fecha BETWEEN ?1 AND ?2
-         GROUP BY tipo, categoria
+         GROUP BY tipo, categoria, grupo_otros
          ORDER BY tipo DESC, SUM(monto) DESC",
     ).map_err(s)?;
     let rows = q.query_map(params![desde, hasta], |r| {
-        Ok(LineaRendicion { tipo: r.get(0)?, categoria: r.get(1)?, total: r.get(2)? })
+        Ok(LineaRendicion { tipo: r.get(0)?, categoria: r.get(1)?, total: r.get(2)?, grupo: r.get(3)? })
     }).map_err(s)?;
     let v = rows.collect::<Result<Vec<_>, _>>().map_err(s)?;
     Ok(v)
 }
 
 pub fn detalle_rendicion_interno(db: &Connection, id: i64) -> R<Vec<LineaRendicion>> {
-    if let Some(snapshot) = snapshot_de_rendicion(db, id)? {
-        return Ok(snapshot.lineas);
-    }
     detalle_rendicion_actual(db, id)
 }
 
@@ -1154,9 +1411,6 @@ pub fn detalle_mensual_rendicion_actual(db: &Connection, id: i64) -> R<Vec<MesRe
 }
 
 pub fn detalle_mensual_rendicion_interno(db: &Connection, id: i64) -> R<Vec<MesRendicion>> {
-    if let Some(snapshot) = snapshot_de_rendicion(db, id)? {
-        return Ok(snapshot.meses);
-    }
     detalle_mensual_rendicion_actual(db, id)
 }
 
@@ -1206,14 +1460,46 @@ pub fn aprobar_rendicion(st: State<AppState>, id: i64) -> R<()> {
 }
 
 pub fn eliminar_rendicion_interno(db: &Connection, id: i64) -> R<()> {
-    let _: String = db.query_row(
+    let estado: String = db.query_row(
         "SELECT estado FROM rendiciones WHERE id=?1",
         params![id],
         |r| r.get(0),
     ).map_err(|_| "La rendición de cuentas no existe".to_string())?;
 
+    if estado == "Aprobada" {
+        return Err("No se puede eliminar una rendición de cuentas que ya ha sido aprobada".to_string());
+    }
+
     db.execute("DELETE FROM rendiciones WHERE id=?1", params![id]).map_err(s)?;
     Ok(())
+}
+
+/// Recalcula el detalle de la rendición con la caja actual del período y guarda la fecha de
+/// actualización. Permite refrescar sin eliminar y volver a crear la rendición.
+pub fn actualizar_rendicion_interno(db: &Connection, id: i64) -> R<String> {
+    let snapshot = RendicionSnapshot {
+        lineas: detalle_rendicion_actual(db, id)?,
+        meses: detalle_mensual_rendicion_actual(db, id)?,
+    };
+    let json = serde_json::to_string(&snapshot).map_err(s)?;
+    let actualizada: String = db
+        .query_row("SELECT datetime('now','localtime')", [], |r| r.get(0))
+        .map_err(s)?;
+
+    db.execute(
+        "UPDATE rendiciones SET snapshot=?1, actualizada_en=?2 WHERE id=?3",
+        params![json, actualizada, id],
+    ).map_err(s)?;
+    Ok(actualizada)
+}
+
+#[tauri::command]
+pub fn actualizar_rendicion(st: State<AppState>, id: i64) -> R<String> {
+    let u = auth_tesorero_o_admin(&st)?;
+    let db = st.db.lock().map_err(s)?;
+    let actualizada = actualizar_rendicion_interno(&db, id)?;
+    auditar(&db, u.id, "ACTUALIZAR", "rendicion", Some(id))?;
+    Ok(actualizada)
 }
 
 #[tauri::command]
@@ -1509,15 +1795,57 @@ pub fn obtener_configuracion(st: State<AppState>, clave: String) -> R<Option<Str
     db.query_row("SELECT valor FROM configuracion WHERE clave=?1", params![clave], |r| r.get(0)).optional().map_err(s)
 }
 
+/// Saldos en banco de la cooperadora: sólo la Tesorería o el Superadministrador pueden
+/// modificarlos, y cada cambio queda auditado con el valor anterior y el nuevo.
+const SALDOS_BANCO: [(&str, &str); 2] = [
+    ("saldo_cuenta_corriente", "Cuenta corriente (banco)"),
+    ("saldo_plazo_fijo", "Plazo fijo (banco)"),
+];
+
+pub fn guardar_configuracion_interno(db: &Connection, usuario: &Usuario, clave: &str, valor: &str) -> R<()> {
+    let saldo_banco = SALDOS_BANCO.iter().find(|(k, _)| *k == clave);
+    if saldo_banco.is_some() {
+        if usuario.rol != "Superadmin" && usuario.rol != "Tesorero" {
+            return Err("Acceso denegado: sólo la Tesorería o el Superadministrador pueden actualizar los saldos en banco".to_string());
+        }
+    } else if usuario.rol != "Superadmin" && usuario.rol != "Secretaria" && usuario.rol != "Presidente" {
+        return Err("Acceso denegado: sólo el Superadministrador, la Presidencia o la Secretaría pueden actualizar la configuración institucional".to_string());
+    }
+
+    // Los saldos se guardan sólo con dígitos, igual que en el formulario
+    let valor = if saldo_banco.is_some() {
+        valor.chars().filter(|c| c.is_ascii_digit()).collect::<String>()
+    } else {
+        valor.to_string()
+    };
+
+    let anterior: Option<String> = db
+        .query_row("SELECT valor FROM configuracion WHERE clave=?1", params![clave], |r| r.get(0))
+        .optional()
+        .map_err(s)?;
+    db.execute("INSERT INTO configuracion(clave, valor) VALUES(?1, ?2) ON CONFLICT(clave) DO UPDATE SET valor=?2", params![clave, valor]).map_err(s)?;
+
+    // El cambio de saldos queda anexado al historial: fecha y usuario los pone la auditoría,
+    // el detalle guarda el valor anterior y el nuevo.
+    if let Some((_, etiqueta)) = saldo_banco {
+        if anterior.as_deref() != Some(valor.as_str()) {
+            let detalle = format!(
+                "{}: {} → {}",
+                etiqueta,
+                anterior.unwrap_or_else(|| "sin dato".to_string()),
+                valor
+            );
+            auditar_con_detalle(db, usuario.id, "CONFIGURAR", "configuracion", None, Some(&detalle))?;
+        }
+    }
+    Ok(())
+}
+
 #[tauri::command]
 pub fn guardar_configuracion(st: State<AppState>, clave: String, valor: String) -> R<()> {
     let u = auth(&st)?;
-    if u.rol != "Superadmin" && u.rol != "Secretaria" && u.rol != "Presidente" {
-        return Err("Acceso denegado: sólo el Superadministrador, la Presidencia o la Secretaría pueden actualizar la configuración institucional".to_string());
-    }
     let db = st.db.lock().map_err(s)?;
-    db.execute("INSERT INTO configuracion(clave, valor) VALUES(?1, ?2) ON CONFLICT(clave) DO UPDATE SET valor=?2", params![clave, valor]).map_err(s)?;
-    Ok(())
+    guardar_configuracion_interno(&db, &u, &clave, &valor)
 }
 
 #[tauri::command]

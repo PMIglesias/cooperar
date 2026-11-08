@@ -1,15 +1,16 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Layout from "../components/Layout";
 import Card from "../components/ui/Card";
 import Button from "../components/ui/Button";
 import { Field } from "../components/ui/Field";
 import Badge from "../components/ui/Badge";
 import IconButton from "../components/ui/IconButton";
-import { CheckIcon, EditIcon, TrashIcon } from "../components/icons";
-import { ActaFila, api, CuadroFinancieroActa, DatosActa, DecisionActa } from "../api";
+import { CheckIcon, EditIcon, TrashIcon, RefreshIcon } from "../components/icons";
+import { ActaFila, api, CuadroFinancieroActa, DatosActa, DecisionActa, RendicionFila, money } from "../api";
 import fieldStyles from "../components/ui/Field.module.css";
 import ConfirmDialog from "../components/ui/ConfirmDialog";
 import { useApp } from "../context";
+import { cuadroDesdeRendicion, cuadroSinValoresDeRendicion } from "../utils/cuadroDesdeRendicion";
 
 const DECISIONES_BASE = [
   "Designación de 2 socios para firma del acta",
@@ -66,7 +67,7 @@ function TextoInput({ label, value, onChange, disabled = false }: { label: strin
   );
 }
 
-const nuevaActa = (): DatosActa => ({
+const nuevaActa = (banco?: { cuentaCorriente?: string; plazoFijo?: string }): DatosActa => ({
   tipo: "Asamblea Anual Ordinaria",
   numero: "",
   foja: "",
@@ -77,7 +78,12 @@ const nuevaActa = (): DatosActa => ({
   cuotaSocial: 0,
   cuotaPeriodicidad: "Mensual",
   cajaChica: 0,
-  cuadroFinanciero: { ...CUADRO_VACIO },
+  cuadroFinanciero: {
+    ...CUADRO_VACIO,
+    // Los saldos informados en la cooperadora se precargan en el acta
+    cuentaCorriente: banco?.cuentaCorriente || "",
+    plazoFijoBanco: banco?.plazoFijo || "",
+  },
   observaciones: "",
   archivoAdjunto: null,
   decisiones: DECISIONES_BASE.map((descripcion, index) => ({
@@ -94,25 +100,140 @@ export default function Actas() {
   const puedeAprobar = usuario.rol === "Presidente" || usuario.rol === "Superadmin";
   const puedeEliminar = usuario.rol === "Superadmin";
   const [actas, setActas] = useState<ActaFila[]>([]);
+  const [rendiciones, setRendiciones] = useState<RendicionFila[]>([]);
+  const [aplicandoRendicion, setAplicandoRendicion] = useState(false);
+  const [trayendoSaldo, setTrayendoSaldo] = useState(false);
+  const [origenSaldoAnterior, setOrigenSaldoAnterior] = useState<string | null>(null);
   const [form, setForm] = useState<DatosActa | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [guardando, setGuardando] = useState(false);
   const [actaParaEliminar, setActaParaEliminar] = useState<ActaFila | null>(null);
+  /** Última rendición volcada automáticamente (evita repetir la carga en cada render) */
+  const aplicadaRef = useRef<string | null>(null);
 
-  const cargar = () => api.listarActas().then(setActas).catch((e) => setError(String(e)));
+  const cargar = () => {
+    api.listarActas().then(setActas).catch((e) => setError(String(e)));
+    api.listarRendiciones().then(setRendiciones).catch(() => {});
+  };
   useEffect(() => { cargar(); }, []);
 
-  const editar = (acta?: ActaFila) => {
+  // Saldos en banco informados en la cooperadora: se usan como valor inicial del acta
+  const [saldosBanco, setSaldosBanco] = useState<{ cuentaCorriente: string; plazoFijo: string }>({
+    cuentaCorriente: "",
+    plazoFijo: "",
+  });
+  useEffect(() => {
+    api.obtenerDatosInstitucionales()
+      .then((inst) => setSaldosBanco({
+        cuentaCorriente: inst.saldoCuentaCorriente || "",
+        plazoFijo: inst.saldoPlazoFijo || "",
+      }))
+      .catch(() => {});
+  }, []);
+
+  const editar = async (acta?: ActaFila) => {
     setError(null);
-    setForm(acta ? {
-      ...acta,
-      reunionId: acta.reunionId,
-      archivoAdjunto: acta.archivoAdjunto,
-      cuadroFinanciero: { ...CUADRO_VACIO, ...acta.cuadroFinanciero },
-      decisiones: acta.decisiones.filter((decision) => decision.orden <= 5).length
-        ? acta.decisiones.filter((decision) => decision.orden <= 5)
-        : nuevaActa().decisiones,
-    } : nuevaActa());
+    setOrigenSaldoAnterior(null);
+    aplicadaRef.current = null;
+    if (acta) {
+      setForm({
+        ...acta,
+        reunionId: acta.reunionId,
+        archivoAdjunto: acta.archivoAdjunto,
+        cuadroFinanciero: { ...CUADRO_VACIO, ...acta.cuadroFinanciero },
+        decisiones: acta.decisiones.filter((decision) => decision.orden <= 5).length
+          ? acta.decisiones.filter((decision) => decision.orden <= 5)
+          : nuevaActa().decisiones,
+      });
+      return;
+    }
+
+    // Acta nueva: se propone el período de la rendición más reciente; los valores se
+    // traen solos cuando el período queda vinculado (ver efecto más abajo).
+    const rendicion = rendiciones[0];
+    setForm({
+      ...nuevaActa(saldosBanco),
+      ...(rendicion ? { periodoDesde: rendicion.desde.slice(0, 4), periodoHasta: rendicion.hasta.slice(0, 4) } : {}),
+    });
+  };
+
+  /** Rendición del ejercicio indicado en el acta (1/5 del año "desde" al 30/4 del año "hasta") */
+  const rendicionDelPeriodo = (desde: string, hasta: string) => {
+    if (!/^\d{4}$/.test(desde) || !/^\d{4}$/.test(hasta)) return undefined;
+    return rendiciones.find((r) => r.desde === `${desde}-05-01` && r.hasta === `${hasta}-04-30`);
+  };
+
+  const rendicionVinculada = form ? rendicionDelPeriodo(form.periodoDesde, form.periodoHasta) : undefined;
+
+  // Al elegir el período de una rendición, el acta trae todos los valores sola: siempre en
+  // un acta nueva y, en una guardada, sólo si todavía no tiene valores de rendición (nunca
+  // se pisan los números de un acta firmada ni los ya cargados).
+  useEffect(() => {
+    if (!form || !rendicionVinculada) return;
+    const puedeAuto = !form.id || (form.estado === "Borrador" && cuadroSinValoresDeRendicion(form.cuadroFinanciero));
+    if (!puedeAuto) return;
+    const clave = `${rendicionVinculada.id}|${form.periodoDesde}|${form.periodoHasta}`;
+    if (aplicadaRef.current === clave) return;
+    aplicadaRef.current = clave;
+    void aplicarRendicion();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [form?.periodoDesde, form?.periodoHasta, rendiciones.length]);
+
+  /** Vuelca en el cuadro los valores de la rendición vinculada, sin perder los saldos en banco */
+  const aplicarRendicion = async () => {
+    if (!form || !rendicionVinculada) return;
+    setAplicandoRendicion(true);
+    setError(null);
+    try {
+      const lineas = await api.detalleRendicion(rendicionVinculada.id);
+      setForm((actual) => actual
+        ? { ...actual, cuadroFinanciero: cuadroDesdeRendicion(lineas, actual.cuadroFinanciero) }
+        : actual);
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setAplicandoRendicion(false);
+    }
+  };
+
+  const importe = (valor?: string) => Number(String(valor ?? "").replace(/\D/g, "")) || 0;
+
+  /**
+   * Trae el "Saldo ejercicio anterior" del cierre del ejercicio anterior: primero el acta
+   * aprobada, luego el acumulado de caja. Si no hay antecedentes, queda la carga manual.
+   */
+  const traerSaldoAnterior = async () => {
+    if (!form) return;
+    if (!/^\d{4}$/.test(form.periodoDesde)) {
+      setError("Indicá el año de inicio del ejercicio (campo «período desde») para buscar el saldo");
+      return;
+    }
+    setTrayendoSaldo(true);
+    setError(null);
+    try {
+      const resultado = await api.saldoEjercicioAnterior(`${form.periodoDesde}-05-01`);
+      setOrigenSaldoAnterior(resultado.detalle);
+      if (resultado.origen === "sin_datos") return;
+      setForm((actual) => {
+        if (!actual) return actual;
+        const entradas = importe(actual.cuadroFinanciero.resumenTotalEntradas || actual.cuadroFinanciero.totalEntradas);
+        const salidas = importe(actual.cuadroFinanciero.totalSalidasResumen);
+        const totalGeneral = entradas + resultado.saldo;
+        return {
+          ...actual,
+          cuadroFinanciero: {
+            ...actual.cuadroFinanciero,
+            saldoEjercicioAnterior: String(resultado.saldo),
+            totalGeneral: String(totalGeneral),
+            saldoProximoEjercicio: String(totalGeneral - salidas),
+          },
+        };
+      });
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setTrayendoSaldo(false);
+    }
   };
 
   const actualizar = <K extends keyof DatosActa>(campo: K, valor: DatosActa[K]) => {
@@ -316,7 +437,7 @@ export default function Actas() {
                 style={{ width: 180, textAlign: "right", paddingRight: 14 }}
                 type="text"
                 inputMode="numeric"
-                value={form.cuotaSocial}
+                value={form.cuotaSocial === 0 ? "" : String(form.cuotaSocial)}
                 onChange={(e) => actualizar("cuotaSocial", Number(e.target.value.replace(/\D/g, "")))}
               />
             </label>
@@ -343,11 +464,44 @@ export default function Actas() {
               style={{ width: 180, textAlign: "right", paddingRight: 14 }}
               type="text"
               inputMode="numeric"
-              value={form.cajaChica}
+              value={form.cajaChica === 0 ? "" : String(form.cajaChica)}
               onChange={(e) => actualizar("cajaChica", Number(e.target.value.replace(/\D/g, "")))}
             />
           </label>
           <h3 style={{ marginTop: "var(--space-5)", marginBottom: "var(--space-3)" }}>Cuadro demostrativo de recursos y gastos</h3>
+          <p style={{ margin: "0 0 var(--space-2)", fontSize: "var(--fs-sm)", color: "var(--color-text-muted)", lineHeight: 1.4 }}>
+            {rendicionVinculada ? (
+              <>
+                Vinculado a la rendición <strong>{rendicionVinculada.periodo}</strong> ({rendicionVinculada.estado}):
+                ingresos {money(rendicionVinculada.totalIngresos)} · egresos {money(rendicionVinculada.totalEgresos)}.{" "}
+                {form.id
+                  ? "El acta guardada conserva sus valores; podés volver a traerlos si la caja cambió."
+                  : "Los valores se traen automáticamente."}
+                {form.id && (
+                  <button
+                    type="button"
+                    onClick={() => void aplicarRendicion()}
+                    disabled={aplicandoRendicion}
+                    style={{
+                      marginLeft: "var(--space-2)",
+                      background: "none",
+                      border: 0,
+                      padding: 0,
+                      color: "var(--color-primary)",
+                      fontWeight: 600,
+                      textDecoration: "underline",
+                      cursor: "pointer",
+                      font: "inherit",
+                    }}
+                  >
+                    {aplicandoRendicion ? "Actualizando..." : "Actualizar desde la rendición"}
+                  </button>
+                )}
+              </>
+            ) : (
+              <>No hay una rendición para el ejercicio {form.periodoDesde || "—"}/{form.periodoHasta || "—"}: indicá el período del acta o cargá los valores a mano.</>
+            )}
+          </p>
           <p style={{ margin: "0 0 var(--space-2)", fontSize: "var(--fs-sm)", fontStyle: "italic", lineHeight: 1.3 }}>
             Ejercicio comprendido entre el 1/5 y del 30/4 presentado para su aprobación en la asamblea.
           </p>
@@ -374,6 +528,20 @@ export default function Actas() {
           <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: "var(--space-1)" }}>
             <DineroInput label="Total entradas (⑧A)" value={form.cuadroFinanciero.resumenTotalEntradas} onChange={(v) => actualizarCuadro("resumenTotalEntradas", v)} />
             <DineroInput label="Saldo ejercicio anterior" value={form.cuadroFinanciero.saldoEjercicioAnterior} onChange={(v) => actualizarCuadro("saldoEjercicioAnterior", v)} />
+            <div style={{ display: "flex", alignItems: "center", gap: "var(--space-2)", paddingLeft: "var(--space-5)", marginBottom: "var(--space-2)" }}>
+              <IconButton
+                icon={<RefreshIcon size={16} />}
+                title="Traer del ejercicio anterior"
+                square
+                onClick={() => void traerSaldoAnterior()}
+                disabled={trayendoSaldo}
+              />
+              {origenSaldoAnterior && (
+                <span style={{ fontSize: "var(--fs-sm)", color: "var(--color-text-muted)" }}>
+                  {origenSaldoAnterior}
+                </span>
+              )}
+            </div>
             <DineroInput label="Total general (total entradas + saldo ejercicio anterior)" value={form.cuadroFinanciero.totalGeneral} onChange={(v) => actualizarCuadro("totalGeneral", v)} />
             <DineroInput label="Total salidas (⑧B)" value={form.cuadroFinanciero.totalSalidasResumen} onChange={(v) => actualizarCuadro("totalSalidasResumen", v)} />
             <DineroInput label="Saldo próximo ejercicio (total general - total salidas)" value={form.cuadroFinanciero.saldoProximoEjercicio} onChange={(v) => actualizarCuadro("saldoProximoEjercicio", v)} />

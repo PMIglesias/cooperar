@@ -104,6 +104,32 @@
   gap: var(--space-5);
 }
 
+/* Vista planilla: la hoja se desplaza y las acciones quedan fijas al pie, fuera de la plantilla */
+.detailLayout {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  flex: 1 1 auto;
+  min-height: 0;
+}
+.sheetScroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+}
+.sheetActions {
+  flex-shrink: 0;
+  display: flex;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--color-border);
+}
+
 .sheetHeader {
   text-align: center;
   border-bottom: 2px solid var(--color-border);

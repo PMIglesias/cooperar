@@ -1,6 +1,13 @@
 // src/utils/pdfGenerators.ts
-import { PDFDocument, StandardFonts } from "pdf-lib";
 import { MiembroComisionFila, DatosInstitucionales } from "../api";
+
+/**
+ * pdf-lib pesa ~500 kB minificado: se carga por demanda la primera vez que se genera
+ * un documento, en lugar de incluirlo en el bundle inicial de la aplicación.
+ */
+type PdfLib = typeof import("pdf-lib");
+let pdfLibPromesa: Promise<PdfLib> | null = null;
+const cargarPdfLib = (): Promise<PdfLib> => (pdfLibPromesa ??= import("pdf-lib"));
 
 const formatearFechaDocumento = (valor: string) => {
   const iso = valor.match(/^(\d{4})-(\d{2})-(\d{2})$/);
@@ -17,6 +24,7 @@ export async function generarPdfNomina(
     return res.arrayBuffer();
   });
 
+  const { PDFDocument } = await cargarPdfLib();
   const pdfDoc = await PDFDocument.load(existingPdfBytes);
   const form = pdfDoc.getForm();
 
@@ -177,6 +185,7 @@ export async function generarPdfPia(
     return res.arrayBuffer();
   });
 
+  const { PDFDocument, StandardFonts } = await cargarPdfLib();
   const pdfDoc = await PDFDocument.load(existingPdfBytes);
   const form = pdfDoc.getForm();
   const formFont = await pdfDoc.embedFont(StandardFonts.Helvetica);

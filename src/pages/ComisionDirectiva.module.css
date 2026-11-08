@@ -224,6 +224,20 @@
   margin-top: var(--space-3);
 }
 
+/* En Banco y Caja Chica, uno al lado del otro */
+.configTwoCols {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-6);
+  align-items: stretch;
+}
+.configTwoCols .configGrid {
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+}
+@media (max-width: 1180px) {
+  .configTwoCols { grid-template-columns: 1fr; }
+}
+
 .sectionHeader {
   margin-bottom: var(--space-4);
 }
@@ -245,6 +259,26 @@
   margin-top: var(--space-6);
   display: flex;
   gap: var(--space-3);
+  align-items: center;
+}
+
+/* Confirmación de guardado, al lado del botón */
+.savedMsg {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  color: var(--color-ok);
+  background: var(--color-ok-bg);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius);
+  animation: savedFadeIn 0.18s ease-out;
+}
+
+@keyframes savedFadeIn {
+  from { opacity: 0; transform: translateY(2px); }
+  to { opacity: 1; transform: translateY(0); }
 }
 
 /* Logo Institucional Circular */
@@ -384,7 +418,7 @@
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  max-height: 90vh;
+  max-height: calc(100vh - 2 * var(--space-4));
 }
 
 .modalHeader {
@@ -421,12 +455,25 @@
   background: var(--color-th-bg);
 }
 
+/* El formulario del modal ocupa el alto disponible para que el pie no se corte:
+   modalCard (flex column) → modalForm (flex) → modalBody (scroll) + modalFooter (fijo) */
+.modalForm {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
 .modalBody {
   padding: var(--space-6);
   overflow-y: auto;
   display: flex;
   flex-direction: column;
   gap: var(--space-4);
+  /* El cuerpo se ajusta al alto del modal y hace scroll: así el pie con los
+     botones (Cancelar / Guardar cambios) nunca queda cortado. */
+  flex: 1 1 auto;
+  min-height: 0;
 }
 
 .modalRow {
@@ -442,6 +489,7 @@
   padding: var(--space-4) var(--space-6);
   border-top: 1px solid var(--color-border);
   background: var(--color-surface-soft, var(--color-th-bg));
+  flex-shrink: 0;
 }
 
 /* Cropper Modal */

@@ -7,6 +7,10 @@ import "@fontsource/inter/700.css";
 import "./styles/global.css";
 import App from "./App";
 
+document.addEventListener("contextmenu", (event) => {
+  event.preventDefault();
+});
+
 createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
     <App />

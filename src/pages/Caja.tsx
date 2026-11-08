@@ -90,8 +90,8 @@ export default function Caja() {
   const [loading, setLoading] = useState(false);
 
   // Formulario Nuevo Movimiento
-  const [tipo, setTipo] = useState<"Ingreso" | "Egreso">("Egreso");
-  const [categoria, setCategoria] = useState(CATEGORIAS_EGRESO[0]);
+  const [tipo, setTipo] = useState<"Ingreso" | "Egreso">("Ingreso");
+  const [categoria, setCategoria] = useState(CATEGORIAS_INGRESO[0]);
   const [nombreOtraCategoria, setNombreOtraCategoria] = useState("");
   const [fecha, setFecha] = useState(hoyISO());
   const [descripcion, setDescripcion] = useState("");
@@ -132,8 +132,8 @@ export default function Caja() {
   }, [tipoFiltro, catFiltro, busqueda]);
 
   const abrirNuevoMovimiento = () => {
-    setTipo("Egreso");
-    setCategoria(CATEGORIAS_EGRESO[0]);
+    setTipo("Ingreso");
+    setCategoria(CATEGORIAS_INGRESO[0]);
     setNombreOtraCategoria("");
     setFecha(hoyISO());
     setDescripcion("");

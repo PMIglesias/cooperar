@@ -5,8 +5,16 @@ export type Rol = "Presidente" | "Secretaria" | "Tesorero" | "Superadmin" | "Ase
 export interface Usuario { id: number; nombre: string; rol: Rol }
 export interface Movimiento { descripcion: string; tipo: "Ingreso" | "Egreso"; monto: number }
 export interface ResumenInicio {
-  saldoCaja: number; cuotasCobradas: number; cuotasTotal: number; conDeuda: number;
-  proximaReunion: string | null; ultimosMovimientos: Movimiento[]; ultimaCopia: string | null;
+  saldoCaja: number;
+  /** Bonos anuales del año corriente ya abonados (familias distintas) */
+  bonosCobrados: number;
+  /** Asociados activos: familias a las que se les ofrece el bono */
+  bonosTotal: number;
+  /** Familias que abonaron los materiales del año corriente */
+  materialesCobrados: number;
+  proximaReunion: string | null;
+  ultimosMovimientos: Movimiento[];
+  ultimaCopia: string | null;
 }
 export interface AuditoriaFila {
   id: number;
@@ -15,9 +23,27 @@ export interface AuditoriaFila {
   accion: string;
   entidad: string;
   entidadId: number | null;
+  /** Detalle legible del cambio (valor anterior → nuevo), cuando aplica */
+  detalle?: string | null;
 }
-export interface ResumenPadron { activos: number; conDeuda: number; exentos: number }
-export type EstadoCuotas = "Al día" | "Con deuda" | "Exento";
+export interface ResumenPadron { activos: number; colaboraron: number; noColaboraron: number }
+/** El bono es colaborativo: no existe deuda ni exención, sólo consta si la familia colaboró en el año */
+export type EstadoColaboracion = "Colaboró" | "No colaboró";
+
+/** Conceptos del bono contribución */
+export type ConceptoPago = "BONO_ANUAL" | "MATERIALES";
+
+export const CONCEPTOS: { value: ConceptoPago; label: string }[] = [
+  { value: "BONO_ANUAL", label: "Bono contribución anual" },
+  { value: "MATERIALES", label: "Bono contribución materiales" },
+];
+
+/** Etiqueta legible del concepto, incluidos los registros históricos de cuota mensual */
+export const etiquetaConcepto = (concepto: string) => {
+  if (concepto === "BONO_ANUAL") return "Bono contribución anual";
+  if (concepto === "MATERIALES") return "Bono contribución materiales";
+  return "Cuota social (histórico)";
+};
 
 export interface AsociadoFila {
   id: number;
@@ -26,9 +52,16 @@ export interface AsociadoFila {
   telefono: string | null;
   email: string | null;
   alumnos: string | null;
-  estadoCuotas: EstadoCuotas;
+  cantidadAlumnos: number;
+  tieneHermanos: number;
+  estadoColaboracion: EstadoColaboracion;
+  /** 1 si la familia abonó el bono de la cooperadora del año corriente */
+  bonoAnualPagado: number;
+  /** 1 si la familia abonó el bono de materiales del año corriente */
+  materialesPagado: number;
   activo: number;
   tipoVinculo: string;
+  fechaAlta: string;
 }
 
 export interface AlumnoItem {
@@ -45,9 +78,14 @@ export interface AsociadoDetalle {
   email: string | null;
   fechaAlta: string;
   alumnos: string | null;
+  cantidadAlumnos: number;
   listaAlumnos: AlumnoItem[];
-  estadoCuotas: EstadoCuotas;
-  exento: number;
+  estadoColaboracion: EstadoColaboracion;
+  /** 1 si la familia abonó el bono anual del año corriente */
+  bonoAnualPagado: number;
+  /** 1 si la familia abonó el bono de materiales del año corriente */
+  materialesPagado: number;
+  tieneHermanos: number;
   activo: number;
   tipoVinculo: string;
 }
@@ -58,18 +96,22 @@ export interface DatosAsociado {
   telefono?: string;
   email?: string;
   tipoVinculo: string;
+  /** AAAA-MM-DD. En el alta, omitirla usa la fecha del día; en la edición conserva la registrada. */
+  fechaAlta?: string;
   alumnos: { nombre: string; curso: string }[];
 }
 
-export interface Filtros { busqueda: string; estadoCuotas: string; estado: string }
+export interface Filtros { busqueda: string; estadoColaboracion: string; estado: string }
 
-// Cuotas y Pagos
+// Cuotas y Pagos (bono contribución)
 export interface PagoFila {
   id: number;
   asociadoId: number;
   apellidoNombre: string;
   dni: string;
+  /** Año lectivo del bono */
   periodo: string;
+  concepto: string;
   fechaPago: string;
   monto: number;
   medio: string;
@@ -79,16 +121,21 @@ export interface PagoFila {
   registradoPorNombre?: string;
   movimientoId?: number | null;
   adjuntoNombre?: string | null;
+  /** Nota libre cargada al registrar el bono */
+  observaciones?: string | null;
 }
 
 export interface DatosPago {
   asociadoId: number;
+  /** Año lectivo del bono (corriente o entrante) */
   periodo: string;
+  concepto: ConceptoPago;
   monto: number;
   medio: string;
   comprobante?: string;
   adjuntoNombre?: string;
   adjuntoDatos?: string;
+  observaciones?: string;
 }
 
 // Caja
@@ -229,6 +276,8 @@ export interface ActaFila {
 
 export interface DatosActa {
   id?: number;
+  /** Estado del acta cuando se edita una existente (Borrador | Firmada) */
+  estado?: "Borrador" | "Firmada";
   reunionId?: number | null;
   tipo: string;
   numero: string;
@@ -257,6 +306,8 @@ export interface RendicionFila {
   estado: "Borrador" | "Aprobada";
   aprobadaPor: string | null;
   aprobadaEn: string | null;
+  /** Última vez que el detalle se recalculó por cambios en la caja del período */
+  actualizadaEn?: string | null;
   totalIngresos: number;
   totalEgresos: number;
   saldoPeriodo: number;
@@ -273,6 +324,12 @@ export interface MesRendicion {
   mes: string;
   ingresos: number;
   egresos: number;
+}
+
+export interface SaldoEjercicioAnterior {
+  saldo: number;
+  origen: "acta" | "caja" | "sin_datos";
+  detalle: string;
 }
 
 export interface DatosRendicion {
@@ -347,8 +404,18 @@ export interface DatosInstitucionales {
   cuentaCorriente: string;
   cbu: string;
   alias: string;
-  cuotaMensual: string;
-  cuotaAnual: string;
+  /** Saldo en cuenta corriente informado por la cooperadora (alimenta el acta y el P.I.A.) */
+  saldoCuentaCorriente: string;
+  /** Saldo en plazo fijo informado por la cooperadora (alimenta el acta y el P.I.A.) */
+  saldoPlazoFijo: string;
+  /** Monto de caja chica fijado en la asamblea (lo vuelca el acta) */
+  cajaChica: string;
+  /** Bono contribución anual por familia */
+  bonoAnual: string;
+  /** Bono contribución de materiales por alumno */
+  materiales: string;
+  /** Bono de materiales por alumno para familias con hermanos */
+  materialesHermanos: string;
   logoBase64?: string;
 }
 
@@ -392,66 +459,92 @@ export const DEMO_USUARIOS = [
 const isTauri = typeof window !== "undefined" && Boolean((window as unknown as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__);
 
 // In-Memory Mock Store for Browser Preview Mode
-let mockAsociados: AsociadoDetalle[] = [
+/** El detalle por concepto se deriva de los pagos cargados en el preview */
+type MockAsociado = Omit<AsociadoDetalle, "bonoAnualPagado" | "materialesPagado">;
+
+let mockAsociados: MockAsociado[] = [
   {
     id: 1, apellidoNombre: "Álvarez, Marcos", dni: "32111222", telefono: "11-4567-8901", email: "marcos.alvarez@email.com",
-    fechaAlta: "2026-07-01", alumnos: "Lucía Álvarez (3° A)", listaAlumnos: [{ id: 1, nombre: "Lucía Álvarez", curso: "3° A" }],
-    estadoCuotas: "Al día", exento: 0, activo: 1, tipoVinculo: "PADRE_TUTOR",
+    fechaAlta: "2026-07-01", alumnos: "Lucía Álvarez (3° A)", cantidadAlumnos: 1, listaAlumnos: [{ id: 1, nombre: "Lucía Álvarez", curso: "3° A" }],
+    estadoColaboracion: "Colaboró", tieneHermanos: 0, activo: 1, tipoVinculo: "PADRE_TUTOR",
   },
   {
     id: 2, apellidoNombre: "Fernández, Valeria", dni: "29888777", telefono: "11-9876-5432", email: "valeria.fernandez@email.com",
-    fechaAlta: "2026-04-01", alumnos: "Mateo Fernández (5° B), Sofía Fernández (1° A)", listaAlumnos: [{ id: 2, nombre: "Mateo Fernández", curso: "5° B" }, { id: 3, nombre: "Sofía Fernández", curso: "1° A" }],
-    estadoCuotas: "Con deuda", exento: 0, activo: 1, tipoVinculo: "PADRE_TUTOR",
+    fechaAlta: "2026-04-01", alumnos: "Mateo Fernández (5° B), Sofía Fernández (1° A)", cantidadAlumnos: 2, listaAlumnos: [{ id: 2, nombre: "Mateo Fernández", curso: "5° B" }, { id: 3, nombre: "Sofía Fernández", curso: "1° A" }],
+    estadoColaboracion: "Colaboró", tieneHermanos: 1, activo: 1, tipoVinculo: "PADRE_TUTOR",
   },
   {
     id: 3, apellidoNombre: "Gómez, Santiago", dni: "34555666", telefono: "11-2233-4455", email: "santiago.gomez@email.com",
-    fechaAlta: "2025-10-01", alumnos: "Ignacio Gómez (2° C)", listaAlumnos: [{ id: 4, nombre: "Ignacio Gómez", curso: "2° C" }],
-    estadoCuotas: "Exento", exento: 1, activo: 1, tipoVinculo: "SIN_VINCULO",
+    fechaAlta: "2025-10-01", alumnos: "Ignacio Gómez (2° C)", cantidadAlumnos: 1, listaAlumnos: [{ id: 4, nombre: "Ignacio Gómez", curso: "2° C" }],
+    estadoColaboracion: "No colaboró", tieneHermanos: 0, activo: 1, tipoVinculo: "SIN_VINCULO",
   },
   {
     id: 4, apellidoNombre: "López, Mariana", dni: "31222333", telefono: "11-6677-8899", email: "mariana.lopez@email.com",
-    fechaAlta: "2026-08-01", alumnos: "Camila López (4° A)", listaAlumnos: [{ id: 5, nombre: "Camila López", curso: "4° A" }],
-    estadoCuotas: "Al día", exento: 0, activo: 1, tipoVinculo: "PERSONAL_ESCOLAR",
+    fechaAlta: "2026-08-01", alumnos: "Camila López (4° A)", cantidadAlumnos: 1, listaAlumnos: [{ id: 5, nombre: "Camila López", curso: "4° A" }],
+    estadoColaboracion: "Colaboró", tieneHermanos: 0, activo: 1, tipoVinculo: "PERSONAL_ESCOLAR",
   },
   {
     id: 5, apellidoNombre: "Martínez, Diego", dni: "28777666", telefono: "11-3344-5566", email: "diego.martinez@email.com",
-    fechaAlta: "2026-05-01", alumnos: "Tomás Martínez (6° B)", listaAlumnos: [{ id: 6, nombre: "Tomás Martínez", curso: "6° B" }],
-    estadoCuotas: "Al día", exento: 0, activo: 1, tipoVinculo: "PADRE_TUTOR",
+    fechaAlta: "2026-05-01", alumnos: "Tomás Martínez (6° B)", cantidadAlumnos: 1, listaAlumnos: [{ id: 6, nombre: "Tomás Martínez", curso: "6° B" }],
+    estadoColaboracion: "Colaboró", tieneHermanos: 0, activo: 1, tipoVinculo: "PADRE_TUTOR",
   },
   {
     id: 6, apellidoNombre: "Rodríguez, Laura", dni: "33444555", telefono: "11-5566-7788", email: "laura.rodriguez@email.com",
-    fechaAlta: "2026-09-01", alumnos: "Benjamín Rodríguez (1° B)", listaAlumnos: [{ id: 7, nombre: "Benjamín Rodríguez", curso: "1° B" }],
-    estadoCuotas: "Al día", exento: 0, activo: 1, tipoVinculo: "PADRE_TUTOR",
+    fechaAlta: "2026-09-01", alumnos: "Benjamín Rodríguez (1° B)", cantidadAlumnos: 1, listaAlumnos: [{ id: 7, nombre: "Benjamín Rodríguez", curso: "1° B" }],
+    estadoColaboracion: "Colaboró", tieneHermanos: 0, activo: 1, tipoVinculo: "PADRE_TUTOR",
   },
   {
     id: 7, apellidoNombre: "Romero, Pablo", dni: "30111444", telefono: "11-7788-9900", email: "pablo.romero@email.com",
-    fechaAlta: "2026-06-01", alumnos: "Martina Romero (2° A)", listaAlumnos: [{ id: 8, nombre: "Martina Romero", curso: "2° A" }],
-    estadoCuotas: "Al día", exento: 0, activo: 1, tipoVinculo: "PADRE_TUTOR",
+    fechaAlta: "2026-06-01", alumnos: "Martina Romero (2° A)", cantidadAlumnos: 1, listaAlumnos: [{ id: 8, nombre: "Martina Romero", curso: "2° A" }],
+    estadoColaboracion: "No colaboró", tieneHermanos: 0, activo: 1, tipoVinculo: "PADRE_TUTOR",
   },
   {
     id: 8, apellidoNombre: "Sánchez, Elena", dni: "27999111", telefono: "11-8899-0011", email: "elena.sanchez@email.com",
-    fechaAlta: "2026-02-01", alumnos: "Joaquín Sánchez (5° A)", listaAlumnos: [{ id: 9, nombre: "Joaquín Sánchez", curso: "5° A" }],
-    estadoCuotas: "Al día", exento: 0, activo: 1, tipoVinculo: "PADRE_TUTOR",
+    fechaAlta: "2026-02-01", alumnos: "Joaquín Sánchez (5° A)", cantidadAlumnos: 1, listaAlumnos: [{ id: 9, nombre: "Joaquín Sánchez", curso: "5° A" }],
+    estadoColaboracion: "Colaboró", tieneHermanos: 0, activo: 1, tipoVinculo: "PADRE_TUTOR",
   },
 ];
 
+const MOCK_ANIO = String(new Date().getFullYear());
+const mockPago = (
+  id: number,
+  asociadoId: number,
+  apellidoNombre: string,
+  dni: string,
+  concepto: ConceptoPago,
+  monto: number,
+  comprobante: string,
+  fechaPago: string,
+): PagoFila => ({
+  id, asociadoId, apellidoNombre, dni, periodo: MOCK_ANIO, concepto, fechaPago, monto,
+  medio: "Efectivo", comprobante,
+  registradoPor: "Tesorero (Roberto Fernández)", registradoPorRol: "Tesorero", registradoPorNombre: "Roberto Fernández",
+});
+
 let mockPagos: PagoFila[] = [
-  { id: 1, asociadoId: 1, apellidoNombre: "Álvarez, Marcos", dni: "32111222", periodo: "2026-10", fechaPago: "2026-10-04", monto: 8000, medio: "Efectivo", comprobante: "REC-001", registradoPor: "Tesorero (Roberto Fernández)", registradoPorRol: "Tesorero", registradoPorNombre: "Roberto Fernández" },
-  { id: 2, asociadoId: 4, apellidoNombre: "López, Mariana", dni: "31222333", periodo: "2026-10", fechaPago: "2026-10-05", monto: 8000, medio: "Transferencia", comprobante: "TRF-1029", registradoPor: "Tesorero (Roberto Fernández)", registradoPorRol: "Tesorero", registradoPorNombre: "Roberto Fernández" },
-  { id: 3, asociadoId: 5, apellidoNombre: "Martínez, Diego", dni: "28777666", periodo: "2026-10", fechaPago: "2026-10-05", monto: 8000, medio: "Efectivo", comprobante: "REC-002", registradoPor: "Tesorero (Roberto Fernández)", registradoPorRol: "Tesorero", registradoPorNombre: "Roberto Fernández" },
-  { id: 4, asociadoId: 6, apellidoNombre: "Rodríguez, Laura", dni: "33444555", periodo: "2026-10", fechaPago: "2026-10-06", monto: 8000, medio: "Transferencia", comprobante: "TRF-1033", registradoPor: "Tesorero (Roberto Fernández)", registradoPorRol: "Tesorero", registradoPorNombre: "Roberto Fernández" },
-  { id: 5, asociadoId: 7, apellidoNombre: "Romero, Pablo", dni: "30111444", periodo: "2026-10", fechaPago: "2026-10-06", monto: 8000, medio: "Efectivo", comprobante: "REC-003", registradoPor: "Tesorero (Roberto Fernández)", registradoPorRol: "Tesorero", registradoPorNombre: "Roberto Fernández" },
-  { id: 6, asociadoId: 8, apellidoNombre: "Sánchez, Elena", dni: "27999111", periodo: "2026-10", fechaPago: "2026-10-07", monto: 8000, medio: "Transferencia", comprobante: "TRF-1045", registradoPor: "Tesorero (Roberto Fernández)", registradoPorRol: "Tesorero", registradoPorNombre: "Roberto Fernández" },
+  mockPago(1, 1, "Álvarez, Marcos", "32111222", "BONO_ANUAL", 12000, "BONO-001", `${MOCK_ANIO}-10-04`),
+  mockPago(2, 4, "López, Mariana", "31222333", "BONO_ANUAL", 12000, "BONO-002", `${MOCK_ANIO}-10-05`),
+  mockPago(3, 5, "Martínez, Diego", "28777666", "BONO_ANUAL", 12000, "BONO-003", `${MOCK_ANIO}-10-05`),
+  mockPago(4, 6, "Rodríguez, Laura", "33444555", "BONO_ANUAL", 12000, "BONO-004", `${MOCK_ANIO}-10-06`),
+  mockPago(5, 8, "Sánchez, Elena", "27999111", "BONO_ANUAL", 12000, "BONO-005", `${MOCK_ANIO}-10-07`),
+  mockPago(6, 1, "Álvarez, Marcos", "32111222", "MATERIALES", 5000, "MAT-001", `${MOCK_ANIO}-10-05`),
+  mockPago(7, 2, "Fernández, Valeria", "29888777", "MATERIALES", 8000, "MAT-002", `${MOCK_ANIO}-10-06`),
+  mockPago(8, 4, "López, Mariana", "31222333", "MATERIALES", 5000, "MAT-003", `${MOCK_ANIO}-10-07`),
 ];
 
 const mockAdjuntos: Record<number, AdjuntoMovimiento> = {};
 
+/** ¿La familia abonó ese concepto en el año de la simulación? */
+const mockPagoDelAnio = (asociadoId: number, concepto: ConceptoPago) =>
+  mockPagos.some((p) => p.asociadoId === asociadoId && p.concepto === concepto && p.periodo === MOCK_ANIO);
+
+const MOCK_CATEGORIA_BONO = "Cuota Social";
 let mockMovimientos: MovimientoCajaFila[] = [
-  { id: 5, fecha: "2026-10-06", tipo: "Ingreso", categoria: "Cuota Social", descripcion: "Cobro cuotas mes en curso", monto: 48000, comprobante: "LOT-102", anulado: 0 },
-  { id: 4, fecha: "2026-10-04", tipo: "Egreso", categoria: "Mant. y mejoras con fondos propios", descripcion: "Reparación luminarias patio y pasillos", monto: 45000, comprobante: "FAC-8890", anulado: 0 },
-  { id: 3, fecha: "2026-10-02", tipo: "Ingreso", categoria: "Festivales, actos, quermese", descripcion: "Recaudación kermesse familiar escolar", monto: 185000, comprobante: "ACT-012", anulado: 0 },
-  { id: 2, fecha: "2026-09-29", tipo: "Egreso", categoria: "Artículos de limpieza", descripcion: "Compra de artículos de limpieza y desinfección", monto: 25400, comprobante: "FAC-1102", anulado: 0 },
-  { id: 1, fecha: "2026-09-27", tipo: "Ingreso", categoria: "Cuota Social", descripcion: "Cobro cuotas societarias mes anterior", monto: 56000, comprobante: "LOT-101", anulado: 0 },
+  { id: 5, fecha: `${MOCK_ANIO}-10-06`, tipo: "Ingreso", categoria: MOCK_CATEGORIA_BONO, descripcion: "Bono contribución anual del año en curso", monto: 48000, comprobante: "BONO-102", anulado: 0 },
+  { id: 4, fecha: `${MOCK_ANIO}-10-04`, tipo: "Egreso", categoria: "Mant. y mejoras con fondos propios", descripcion: "Reparación luminarias patio y pasillos", monto: 45000, comprobante: "FAC-8890", anulado: 0 },
+  { id: 3, fecha: `${MOCK_ANIO}-10-02`, tipo: "Ingreso", categoria: "Festivales, actos, quermese", descripcion: "Recaudación kermesse familiar escolar", monto: 185000, comprobante: "ACT-012", anulado: 0 },
+  { id: 2, fecha: `${MOCK_ANIO}-09-29`, tipo: "Egreso", categoria: "Artículos de limpieza", descripcion: "Compra de artículos de limpieza y desinfección", monto: 25400, comprobante: "FAC-1102", anulado: 0 },
+  { id: 1, fecha: `${MOCK_ANIO}-09-27`, tipo: "Ingreso", categoria: MOCK_CATEGORIA_BONO, descripcion: "Bono contribución de materiales", monto: 56000, comprobante: "MAT-101", anulado: 0 },
 ];
 
 let mockReuniones: ReunionFila[] = [
@@ -477,7 +570,12 @@ let mockCopias: CopiaSeguridadFila[] = [
 ];
 
 let mockConfiguracion: Record<string, string> = {
-  monto_cuota: "8000",
+  bono_anual: "12000",
+  materiales: "5000",
+  materiales_hermanos: "4000",
+  saldo_cuenta_corriente: "0",
+  saldo_plazo_fijo: "0",
+  caja_chica: "0",
   ultima_copia: "07/10/2026 05:20",
 };
 
@@ -502,9 +600,9 @@ export const api = {
     const activos = mockAsociados.filter((a) => a.activo === 1);
     return {
       saldoCaja: 218600,
-      cuotasCobradas: mockPagos.filter((p) => p.periodo === "2026-10").length,
-      cuotasTotal: activos.filter((a) => a.exento === 0).length,
-      conDeuda: activos.filter((a) => a.estadoCuotas === "Con deuda").length,
+      bonosCobrados: new Set(mockPagos.filter((p) => p.concepto === "BONO_ANUAL" && p.periodo === MOCK_ANIO).map((p) => p.asociadoId)).size,
+      bonosTotal: activos.length,
+      materialesCobrados: new Set(mockPagos.filter((p) => p.concepto === "MATERIALES" && p.periodo === MOCK_ANIO).map((p) => p.asociadoId)).size,
       proximaReunion: "19/10 · Comisión",
       ultimosMovimientos: mockMovimientos.slice(0, 4).map((m) => ({ descripcion: m.descripcion, tipo: m.tipo, monto: m.monto })),
       ultimaCopia: mockConfiguracion.ultima_copia || "07/10/2026 05:20",
@@ -519,8 +617,8 @@ export const api = {
     const activos = mockAsociados.filter((a) => a.activo === 1);
     return {
       activos: activos.length,
-      conDeuda: activos.filter((a) => a.estadoCuotas === "Con deuda").length,
-      exentos: activos.filter((a) => a.exento === 1).length,
+      colaboraron: activos.filter((a) => a.estadoColaboracion === "Colaboró").length,
+      noColaboraron: activos.filter((a) => a.estadoColaboracion === "No colaboró").length,
     };
   },
 
@@ -531,8 +629,8 @@ export const api = {
       .filter((a) => {
         const matchEstado = f.estado === "Todos" ? true : f.estado === "Activos" || f.estado === "Activo" ? a.activo === 1 : a.activo === 0;
         const matchBusqueda = !f.busqueda || a.apellidoNombre.toLowerCase().includes(f.busqueda.toLowerCase()) || a.dni.includes(f.busqueda);
-        const matchCuotas = f.estadoCuotas === "Todos" || a.estadoCuotas === f.estadoCuotas;
-        return matchEstado && matchBusqueda && matchCuotas;
+        const matchColaboracion = f.estadoColaboracion === "Todos" || a.estadoColaboracion === f.estadoColaboracion;
+        return matchEstado && matchBusqueda && matchColaboracion;
       })
       .map((a) => ({
         id: a.id,
@@ -541,16 +639,25 @@ export const api = {
         telefono: a.telefono,
         email: a.email,
         alumnos: a.alumnos,
-        estadoCuotas: a.estadoCuotas,
+        cantidadAlumnos: a.cantidadAlumnos,
+        tieneHermanos: a.tieneHermanos,
+        estadoColaboracion: a.estadoColaboracion,
+        bonoAnualPagado: mockPagoDelAnio(a.id, "BONO_ANUAL") ? 1 : 0,
+        materialesPagado: mockPagoDelAnio(a.id, "MATERIALES") ? 1 : 0,
         activo: a.activo,
         tipoVinculo: a.tipoVinculo,
+        fechaAlta: a.fechaAlta,
       }));
   },
   obtenerAsociado: async (id: number): Promise<AsociadoDetalle> => {
     if (isTauri) return invoke<AsociadoDetalle>("obtener_asociado", { id });
     const found = mockAsociados.find((a) => a.id === id);
     if (!found) throw new Error("Asociado no encontrado");
-    return found;
+    return {
+      ...found,
+      bonoAnualPagado: mockPagoDelAnio(id, "BONO_ANUAL") ? 1 : 0,
+      materialesPagado: mockPagoDelAnio(id, "MATERIALES") ? 1 : 0,
+    };
   },
   crearAsociado: async (datos: DatosAsociado): Promise<number> => {
     if (isTauri) return invoke<number>("crear_asociado", { datos });
@@ -560,17 +667,18 @@ export const api = {
       .map((a, idx) => ({ id: id + idx + 1, nombre: a.nombre.trim(), curso: a.curso.trim() }));
     const alumnosStr = listaAlumnos.map((a) => `${a.nombre} (${a.curso})`).join(", ");
 
-    const nuevo: AsociadoDetalle = {
+    const nuevo: MockAsociado = {
       id,
       apellidoNombre: datos.apellidoNombre.trim(),
       dni: datos.dni.trim(),
       telefono: datos.telefono?.trim() || null,
       email: datos.email?.trim() || null,
-      fechaAlta: new Date().toISOString().split("T")[0],
+      fechaAlta: datos.fechaAlta?.trim() || hoyISO(),
       alumnos: alumnosStr || null,
+      cantidadAlumnos: listaAlumnos.length,
+      tieneHermanos: listaAlumnos.length > 1 ? 1 : 0,
       listaAlumnos,
-      estadoCuotas: "Con deuda",
-      exento: 0,
+      estadoColaboracion: "No colaboró",
       activo: 1,
       tipoVinculo: datos.tipoVinculo,
     };
@@ -593,17 +701,12 @@ export const api = {
         telefono: datos.telefono?.trim() || null,
         email: datos.email?.trim() || null,
         tipoVinculo: datos.tipoVinculo,
+        fechaAlta: datos.fechaAlta?.trim() || mockAsociados[idx].fechaAlta,
         alumnos: alumnosStr || null,
+        cantidadAlumnos: listaAlumnos.length,
+        tieneHermanos: listaAlumnos.length > 1 ? 1 : 0,
         listaAlumnos,
       };
-    }
-  },
-  marcarExento: async (id: number, exento: boolean): Promise<void> => {
-    if (isTauri) return invoke<void>("marcar_exento", { id, exento });
-    const a = mockAsociados.find((x) => x.id === id);
-    if (a) {
-      a.exento = exento ? 1 : 0;
-      a.estadoCuotas = exento ? "Exento" : "Al día";
     }
   },
   darDeBaja: async (id: number): Promise<void> => {
@@ -621,13 +724,14 @@ export const api = {
     if (a) a.activo = 1;
   },
 
-  // Cuotas y Pagos
-  listarPagos: async (busqueda = "", periodo = "Todos"): Promise<PagoFila[]> => {
-    if (isTauri) return invoke<PagoFila[]>("listar_pagos", { busqueda, periodo });
+  // Cuotas y Pagos (bono contribución)
+  listarPagos: async (busqueda = "", anio = "Todos", concepto = "Todos"): Promise<PagoFila[]> => {
+    if (isTauri) return invoke<PagoFila[]>("listar_pagos", { busqueda, anio, concepto });
     return mockPagos.filter((p) => {
-      const matchPeriodo = periodo === "Todos" || !periodo || p.periodo === periodo;
+      const matchAnio = anio === "Todos" || !anio || p.periodo === anio;
+      const matchConcepto = concepto === "Todos" || !concepto || p.concepto === concepto;
       const matchBusqueda = !busqueda || p.apellidoNombre.toLowerCase().includes(busqueda.toLowerCase()) || p.dni.includes(busqueda) || (p.comprobante && p.comprobante.includes(busqueda));
-      return matchPeriodo && matchBusqueda;
+      return matchAnio && matchConcepto && matchBusqueda;
     });
   },
   obtenerHistorialPagosAsociado: async (asociadoId: number): Promise<PagoFila[]> => {
@@ -645,35 +749,33 @@ export const api = {
       apellidoNombre: nombre,
       dni: asociado ? asociado.dni : "",
       periodo: datos.periodo,
-      fechaPago: new Date().toISOString().split("T")[0],
+      concepto: datos.concepto,
+      fechaPago: hoyISO(),
       monto: datos.monto,
       medio: datos.medio,
       comprobante: datos.comprobante || `REC-${id.toString().slice(-4)}`,
       registradoPor: "Usuario Actual",
+      observaciones: datos.observaciones?.trim() || null,
     };
     mockPagos.unshift(nuevoPago);
 
-    // Actualizar estado cuotas del asociado
+    // El bono es colaborativo: sólo se registra que la familia colaboró
     if (asociado) {
-      asociado.estadoCuotas = "Al día";
+      asociado.estadoColaboracion = "Colaboró";
     }
 
-    // Formatear período legible: "2026-10" -> "Mes 10/26", "2026" -> "Anual 2026"
-    let periodoFmt = datos.periodo;
-    if (datos.periodo.length === 7 && datos.periodo.includes("-")) {
-      const [yyyy, mm] = datos.periodo.split("-");
-      periodoFmt = `Mes ${mm}/${yyyy.slice(2)}`;
-    } else if (datos.periodo.length === 4) {
-      periodoFmt = `Anual ${datos.periodo}`;
-    }
+    const alumnos = asociado ? asociado.cantidadAlumnos : 0;
+    const detalleAlumnos = datos.concepto === "MATERIALES"
+      ? ` (${Math.max(alumnos, 1)} ${alumnos === 1 ? "alumno" : "alumnos"})`
+      : "";
 
     // Registrar en caja
     mockMovimientos.unshift({
       id: Date.now() + 1,
       fecha: nuevoPago.fechaPago,
       tipo: "Ingreso",
-      categoria: "Cuota Social",
-      descripcion: `Asociado N° ${datos.asociadoId} - ${periodoFmt}\n${nombre}`,
+      categoria: MOCK_CATEGORIA_BONO,
+      descripcion: `Asociado N° ${datos.asociadoId} - ${etiquetaConcepto(datos.concepto)} ${datos.periodo}${detalleAlumnos}\n${nombre}`,
       monto: datos.monto,
       comprobante: nuevoPago.comprobante,
       anulado: 0,
@@ -792,6 +894,11 @@ export const api = {
     if (isTauri) return invoke<RendicionFila[]>("listar_rendiciones");
     return mockRendiciones;
   },
+  /** Saldo con el que arranca el ejercicio que empieza en `desde` (AAAA-MM-DD) */
+  saldoEjercicioAnterior: async (desde: string): Promise<SaldoEjercicioAnterior> => {
+    if (isTauri) return invoke<SaldoEjercicioAnterior>("saldo_ejercicio_anterior", { desde });
+    return { saldo: 0, origen: "sin_datos", detalle: "Vista previa sin datos de ejercicios anteriores" };
+  },
   crearRendicion: async (datos: DatosRendicion): Promise<number> => {
     if (isTauri) return invoke<number>("crear_rendicion", { datos });
     const id = Date.now();
@@ -819,6 +926,14 @@ export const api = {
       r.aprobadaPor = "Presidente";
       r.aprobadaEn = new Date().toLocaleString("es-AR");
     }
+  },
+  /** Recalcula el detalle con la caja del período y devuelve la fecha de actualización */
+  actualizarRendicion: async (id: number): Promise<string> => {
+    if (isTauri) return invoke<string>("actualizar_rendicion", { id });
+    const fecha = new Date().toLocaleString("es-AR");
+    const r = mockRendiciones.find((x) => x.id === id);
+    if (r) r.actualizadaEn = fecha;
+    return fecha;
   },
   detalleRendicion: async (id: number): Promise<LineaRendicion[]> => {
     if (isTauri) return invoke<LineaRendicion[]>("detalle_rendicion", { id });
@@ -1060,13 +1175,17 @@ export const api = {
       "cue", "cuit", "domicilio_escuela", "barrio", "localidad",
       "telefono_escuela", "email_institucional", "banco_nombre",
       "banco_sucursal", "cuenta_corriente", "cbu", "alias",
-      "cuota_mensual", "cuota_anual", "logo_cooperadora"
+      "saldo_cuenta_corriente", "saldo_plazo_fijo", "caja_chica",
+      "bono_anual", "materiales", "materiales_hermanos", "logo_cooperadora"
     ];
     const res: Record<string, string> = {};
     for (const k of keys) {
       const v = await api.obtenerConfiguracion(k);
       res[k] = v || "";
     }
+    // Los importes sin informar vuelven vacíos en lugar de "0": así el campo no arranca
+    // con un cero que hay que borrar antes de escribir.
+    const importe = (valor: string | undefined) => (!valor || valor === "0" ? "" : valor);
     return {
       distrito: res.distrito || "Morón",
       numeroEscuela: res.numero_escuela || "E.P. N° 12",
@@ -1084,8 +1203,12 @@ export const api = {
       cuentaCorriente: res.cuenta_corriente || "5012-12345/6",
       cbu: res.cbu || "0140012301501201234567",
       alias: res.alias || "COOP.EP12.MORON",
-      cuotaMensual: res.cuota_mensual || "8000",
-      cuotaAnual: res.cuota_anual || "80000",
+      saldoCuentaCorriente: importe(res.saldo_cuenta_corriente),
+      saldoPlazoFijo: importe(res.saldo_plazo_fijo),
+      cajaChica: importe(res.caja_chica),
+      bonoAnual: res.bono_anual || "12000",
+      materiales: res.materiales || "5000",
+      materialesHermanos: res.materiales_hermanos || "4000",
       logoBase64: res.logo_cooperadora || "",
     };
   },
@@ -1108,8 +1231,12 @@ export const api = {
       cuenta_corriente: datos.cuentaCorriente,
       cbu: datos.cbu,
       alias: datos.alias,
-      cuota_mensual: datos.cuotaMensual,
-      cuota_anual: datos.cuotaAnual,
+      saldo_cuenta_corriente: datos.saldoCuentaCorriente,
+      saldo_plazo_fijo: datos.saldoPlazoFijo,
+      caja_chica: datos.cajaChica,
+      bono_anual: datos.bonoAnual,
+      materiales: datos.materiales,
+      materiales_hermanos: datos.materialesHermanos,
       logo_cooperadora: datos.logoBase64 || "",
     };
     for (const [k, v] of Object.entries(mapping)) {

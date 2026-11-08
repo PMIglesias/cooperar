@@ -7,7 +7,7 @@ export interface ColumnasSeleccionadas {
   email: boolean;
   alumnos: boolean;
   fechaAlta: boolean;
-  estadoCuotas: boolean;
+  colaboracion: boolean;
   activo: boolean;
   firma: boolean;
 }
@@ -18,9 +18,15 @@ export const COLUMNAS_DEFAULT: ColumnasSeleccionadas = {
   email: false,
   alumnos: true,
   fechaAlta: false,
-  estadoCuotas: true,
+  colaboracion: true,
   activo: true,
   firma: false,
+};
+
+/** "2025-03-01" → "01/03/2025": la fecha de alta se guarda en ISO y se imprime en formato local */
+const fechaCorta = (fecha?: string | null) => {
+  const partes = /^(\d{4})-(\d{2})-(\d{2})/.exec(fecha || "");
+  return partes ? `${partes[3]}/${partes[2]}/${partes[1]}` : fecha || "—";
 };
 
 export function generarHtmlListadoAsociados(
@@ -53,19 +59,12 @@ export function generarHtmlListadoAsociados(
     cols.email ? `<th style="text-align: left;">Correo</th>` : "",
     cols.alumnos ? `<th style="text-align: left;">Alumnos a Cargo</th>` : "",
     cols.fechaAlta ? `<th style="width: 85px; text-align: center;">F. Alta</th>` : "",
-    cols.estadoCuotas ? `<th style="width: 90px; text-align: center;">Cuotas</th>` : "",
+    cols.colaboracion ? `<th style="width: 110px; text-align: center;">Contribución C/M</th>` : "",
     cols.activo ? `<th style="width: 80px; text-align: center;">Estado</th>` : "",
     cols.firma ? `<th style="width: 140px; text-align: center;">Firma del Socio</th>` : "",
   ].filter(Boolean).join("");
 
   const rowsHtml = asociados.map((a, idx) => {
-    const estadoCuotaTone =
-      a.estadoCuotas === "Al día"
-        ? "color: #047857; font-weight: 600;"
-        : a.estadoCuotas === "Con deuda"
-        ? "color: #b91c1c; font-weight: 600;"
-        : "color: #b45309; font-weight: 600;";
-
     const estadoTone = a.activo === 1 ? "color: #111827;" : "color: #9ca3af; font-style: italic;";
 
     return `
@@ -76,8 +75,8 @@ export function generarHtmlListadoAsociados(
         ${cols.telefono ? `<td style="font-size: 11.5px;">${a.telefono || "—"}</td>` : ""}
         ${cols.email ? `<td style="font-size: 11px; color: #374151;">${(a as any).email || "—"}</td>` : ""}
         ${cols.alumnos ? `<td style="font-size: 11.5px; color: #1f2937;">${a.alumnos || "—"}</td>` : ""}
-        ${cols.fechaAlta ? `<td style="text-align: center; font-size: 11px;">${(a as any).fechaAlta || "—"}</td>` : ""}
-        ${cols.estadoCuotas ? `<td style="text-align: center; font-size: 11px; ${estadoCuotaTone}">${a.estadoCuotas}</td>` : ""}
+        ${cols.fechaAlta ? `<td style="text-align: center; font-size: 11px;">${fechaCorta(a.fechaAlta)}</td>` : ""}
+        ${cols.colaboracion ? `<td style="text-align: center; font-size: 11px;"><span style="color: ${a.bonoAnualPagado === 1 ? "#047857" : "#b91c1c"}; font-weight: 700;" title="Cooperadora">C</span> <span style="color: ${a.materialesPagado === 1 ? "#047857" : "#b91c1c"}; font-weight: 700;" title="Materiales">M</span></td>` : ""}
         ${cols.activo ? `<td style="text-align: center; font-size: 11px; ${estadoTone}">${a.activo === 1 ? "Activo" : "De baja"}</td>` : ""}
         ${cols.firma ? `<td style="border-bottom: 1px dashed #9ca3af; height: 32px;"></td>` : ""}
       </tr>
@@ -274,6 +273,7 @@ export function generarHtmlFichaAsociado(
       <tr style="border-bottom: 1px solid #e5e7eb; ${styleRow}">
         <td style="text-align: center; font-size: 11px;">${p.fechaPago}</td>
         <td style="text-align: center; font-weight: 700; color: #0f3d5e;">${p.periodo}</td>
+        <td style="font-size: 11px;">${p.concepto === "MATERIALES" ? "Bono materiales" : p.concepto === "BONO_ANUAL" ? "Bono anual" : "Cuota social (histórico)"}</td>
         <td style="text-align: center; font-family: monospace; font-size: 11px;">${p.comprobante || `REC-${p.id}`}</td>
         <td style="font-size: 11px;">${p.medio}</td>
         <td style="text-align: right; font-weight: 700; color: ${isAnulado ? "#9ca3af" : "#047857"};">
@@ -488,7 +488,7 @@ export function generarHtmlFichaAsociado(
     </div>
     <div class="data-item">
       <span class="data-label">Fecha de Ingreso / Alta</span>
-      <span class="data-value">${asociado.fechaAlta}</span>
+      <span class="data-value">${fechaCorta(asociado.fechaAlta)}</span>
     </div>
     <div class="data-item">
       <span class="data-label">Estado Societario</span>
@@ -497,10 +497,16 @@ export function generarHtmlFichaAsociado(
       </span>
     </div>
     <div class="data-item">
-      <span class="data-label">Situación Arancelaria</span>
-      <span class="data-value" style="${asociado.estadoCuotas === "Al día" ? "color: #047857;" : asociado.estadoCuotas === "Con deuda" ? "color: #dc2626;" : "color: #b45309;"}">
-        ${asociado.estadoCuotas} ${asociado.exento === 1 ? "(Exención Aprobada)" : ""}
+      <span class="data-label">Bono contribución ${new Date().getFullYear()}</span>
+      <span class="data-value">
+        <span style="font-weight: 600; ${asociado.bonoAnualPagado === 1 ? "color: #047857;" : "color: #b91c1c;"}">Cooperadora</span>
+        ·
+        <span style="font-weight: 600; ${asociado.materialesPagado === 1 ? "color: #047857;" : "color: #b91c1c;"}">Materiales</span>
       </span>
+    </div>
+    <div class="data-item">
+      <span class="data-label">Hermanos</span>
+      <span class="data-value">${asociado.tieneHermanos === 1 ? `Sí (${asociado.cantidadAlumnos})` : "No"}</span>
     </div>
   </div>
 
@@ -514,7 +520,8 @@ export function generarHtmlFichaAsociado(
     <thead>
       <tr>
         <th style="width: 85px;">Fecha</th>
-        <th style="width: 80px;">Período</th>
+        <th style="width: 60px;">Año</th>
+        <th>Concepto</th>
         <th style="width: 100px;">Comprobante</th>
         <th>Medio de Pago</th>
         <th style="width: 110px; text-align: right;">Monto Aportado</th>
@@ -522,12 +529,12 @@ export function generarHtmlFichaAsociado(
       </tr>
     </thead>
     <tbody>
-      ${pagosFilasHtml || `<tr><td colspan="6" style="text-align: center; padding: 16px; color: #6b7280;">No registra pagos asentados en la cuenta de cuotas.</td></tr>`}
+      ${pagosFilasHtml || `<tr><td colspan="7" style="text-align: center; padding: 16px; color: #6b7280;">No registra bonos contribución asentados.</td></tr>`}
     </tbody>
   </table>
 
   <div class="summary-box">
-    <span>Total de cuotas activas registradas: ${pagos.filter((p: any) => p.anulado !== 1).length}</span>
+    <span>Total de bonos activos registrados: ${pagos.filter((p: any) => p.anulado !== 1).length}</span>
     <span>Suma Total Aportada: $ ${totalAportado.toLocaleString("es-AR")}</span>
   </div>
 

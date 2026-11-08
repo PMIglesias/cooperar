@@ -4,17 +4,18 @@ import {
   api,
   AsociadoFila,
   AsociadoDetalle,
-  EstadoCuotas,
   ResumenPadron,
   PagoFila,
   DatosInstitucionales,
   PersonalEstablecimientoFila,
   money,
+  hoyISO,
+  etiquetaConcepto,
 } from "../api";
 import Layout from "../components/Layout";
 import Button from "../components/ui/Button";
 import Card from "../components/ui/Card";
-import Badge, { Tone } from "../components/ui/Badge";
+import Badge from "../components/ui/Badge";
 import DataTable, { Column } from "../components/ui/DataTable";
 import { Field, SelectField } from "../components/ui/Field";
 import ConfirmDialog from "../components/ui/ConfirmDialog";
@@ -30,12 +31,6 @@ import {
 } from "../utils/asociadosPrintHtml";
 import s from "./Asociados.module.css";
 
-const TONE: Record<EstadoCuotas, Tone> = {
-  "Al día": "ok",
-  "Con deuda": "danger",
-  Exento: "warn",
-};
-
 interface FormAlumno {
   nombre: string;
   curso: string;
@@ -49,7 +44,7 @@ export default function Asociados() {
 
   // Filtros de listado
   const [busqueda, setBusqueda] = useState("");
-  const [estadoCuotas, setEstadoCuotas] = useState("Todos");
+  const [estadoColaboracion, setEstadoColaboracion] = useState("Todos");
   const [estado, setEstado] = useState("Todos"); // "Todos" por defecto
   const [rows, setRows] = useState<AsociadoFila[]>([]);
   const [resumen, setResumen] = useState<ResumenPadron | null>(null);
@@ -80,18 +75,18 @@ export default function Asociados() {
   const [formDni, setFormDni] = useState("");
   const [formTelefono, setFormTelefono] = useState("");
   const [formEmail, setFormEmail] = useState("");
+  const [formFechaAlta, setFormFechaAlta] = useState(hoyISO());
   const [formTipoVinculo, setFormTipoVinculo] = useState("PADRE_TUTOR");
   const [busquedaDirectivo, setBusquedaDirectivo] = useState("");
   const [directivosDropdownOpen, setDirectivosDropdownOpen] = useState(false);
   const [personalEstablecimiento, setPersonalEstablecimiento] = useState<PersonalEstablecimientoFila[]>([]);
-  const [formExento, setFormExento] = useState(false);
   const [formActivo, setFormActivo] = useState(true);
   const [formAlumnos, setFormAlumnos] = useState<FormAlumno[]>([{ nombre: "", curso: "" }]);
   const [formError, setFormError] = useState<string | null>(null);
   const [formSaving, setFormSaving] = useState(false);
 
   const cargarAsociados = () => {
-    api.listarAsociados({ busqueda, estadoCuotas, estado }).then(setRows).catch(console.error);
+    api.listarAsociados({ busqueda, estadoColaboracion, estado }).then(setRows).catch(console.error);
     api.resumenPadron().then(setResumen).catch(console.error);
   };
 
@@ -102,7 +97,7 @@ export default function Asociados() {
 
   useEffect(() => {
     cargarAsociados();
-  }, [busqueda, estadoCuotas, estado]);
+  }, [busqueda, estadoColaboracion, estado]);
 
   const abrirFicha = async (id: number) => {
     setSelectedId(id);
@@ -158,7 +153,7 @@ export default function Asociados() {
     const criterios: string[] = [];
     if (busqueda.trim()) criterios.push(`Búsqueda: "${busqueda.trim()}"`);
     if (estado !== "Todos") criterios.push(`Estado: ${estado}`);
-    if (estadoCuotas !== "Todos") criterios.push(`Cuotas: ${estadoCuotas}`);
+    if (estadoColaboracion !== "Todos") criterios.push(`Contribución: ${estadoColaboracion}`);
     const subtituloFiltros = criterios.length > 0 ? criterios.join(" · ") : "Todos los asociados registrados";
 
     const html = generarHtmlListadoAsociados(rows, institucion, cols, subtituloFiltros);
@@ -213,9 +208,9 @@ export default function Asociados() {
     setFormTelefono("");
     setFormEmail("");
     setFormTipoVinculo("PADRE_TUTOR");
+    setFormFechaAlta(hoyISO());
     setBusquedaDirectivo("");
     setDirectivosDropdownOpen(false);
-    setFormExento(false);
     setFormActivo(true);
     setFormAlumnos([{ nombre: "", curso: "" }]);
     setFormError(null);
@@ -229,9 +224,9 @@ export default function Asociados() {
     setFormTelefono(det.telefono || "");
     setFormEmail(det.email || "");
     setFormTipoVinculo(det.tipoVinculo || "PADRE_TUTOR");
+    setFormFechaAlta(det.fechaAlta ? det.fechaAlta.slice(0, 10) : hoyISO());
     setBusquedaDirectivo("");
     setDirectivosDropdownOpen(false);
-    setFormExento(det.exento === 1);
     setFormActivo(det.activo === 1);
     if (det.listaAlumnos && det.listaAlumnos.length > 0) {
       setFormAlumnos(det.listaAlumnos.map((a) => ({ nombre: a.nombre, curso: a.curso })));
@@ -252,6 +247,12 @@ export default function Asociados() {
       return;
     }
     setFormAlumnos(formAlumnos.filter((_, i) => i !== index));
+  };
+
+  /** "2025-03-01" → "01/03/2025": la fecha de alta se guarda en ISO y se muestra local */
+  const formatearFecha = (fecha: string) => {
+    const partes = /^(\d{4})-(\d{2})-(\d{2})/.exec(fecha || "");
+    return partes ? `${partes[3]}/${partes[2]}/${partes[1]}` : fecha || "—";
   };
 
   const etiquetaVinculo = (tipo: string) => ({
@@ -297,6 +298,10 @@ export default function Asociados() {
       setFormError("El DNI es obligatorio.");
       return;
     }
+    if (formFechaAlta && formFechaAlta > hoyISO()) {
+      setFormError("La fecha de alta no puede ser posterior a hoy.");
+      return;
+    }
 
     const alumnosValidos = formAlumnos.filter((a) => a.nombre.trim() !== "");
 
@@ -309,6 +314,7 @@ export default function Asociados() {
       telefono: formTelefono.trim() || undefined,
       email: formEmail.trim() || undefined,
       tipoVinculo: formTipoVinculo,
+      fechaAlta: formFechaAlta || undefined,
       alumnos: alumnosValidos.map((a) => ({
         nombre: a.nombre.trim(),
         curso: a.curso.trim() || "1°",
@@ -318,7 +324,6 @@ export default function Asociados() {
     try {
       if (editingId) {
         await api.actualizarAsociado(editingId, datos);
-        await api.marcarExento(editingId, formExento);
         if (formActivo !== (ficha?.activo === 1)) {
           if (formActivo) await api.reactivarAsociado(editingId);
           else await api.darDeBaja(editingId);
@@ -338,18 +343,6 @@ export default function Asociados() {
 
   const [confirmBajaOpen, setConfirmBajaOpen] = useState(false);
   const [confirmEliminarOpen, setConfirmEliminarOpen] = useState(false);
-
-  const toggleExento = async () => {
-    if (!ficha) return;
-    const nuevoEstado = ficha.exento === 0;
-    try {
-      await api.marcarExento(ficha.id, nuevoEstado);
-      abrirFicha(ficha.id);
-      cargarAsociados();
-    } catch (err) {
-      console.error(err);
-    }
-  };
 
   const toggleBaja = async () => {
     if (!ficha) return;
@@ -394,10 +387,17 @@ export default function Asociados() {
   };
 
   const COLUMNS: Column<AsociadoFila>[] = [
+    {
+      header: "Socio N°",
+      width: 95,
+      align: "center",
+      render: (a) => <span className={s.socioNumero}>{String(a.id).padStart(4, "0")}</span>,
+    },
     { header: "Apellido y nombre", minWidth: 220, flex: true, render: (a) => <strong>{a.apellidoNombre}</strong> },
     ...(columnasAplicadas.dni ? [{ header: "DNI", minWidth: 110, flex: true, render: (a: AsociadoFila) => a.dni }] : []),
     ...(columnasAplicadas.telefono ? [{ header: "Teléfono", minWidth: 130, flex: true, render: (a: AsociadoFila) => a.telefono || "—" }] : []),
     ...(columnasAplicadas.email ? [{ header: "Correo", minWidth: 210, flex: true, render: (a: AsociadoFila) => a.email || "—" }] : []),
+    ...(columnasAplicadas.fechaAlta ? [{ header: "Fecha de alta", minWidth: 120, flex: true, render: (a: AsociadoFila) => formatearFecha(a.fechaAlta) }] : []),
     ...(columnasAplicadas.alumnos ? [{ header: "Alumnos", minWidth: 180, flex: true, render: (a: AsociadoFila) => a.alumnos || "—" }] : []),
     ...(columnasAplicadas.activo ? [{
       header: "Estado",
@@ -409,11 +409,20 @@ export default function Asociados() {
         </Badge>
       ),
     }] : []),
-    ...(columnasAplicadas.estadoCuotas ? [{
-      header: "Cuotas",
-      minWidth: 115,
+    ...(columnasAplicadas.colaboracion ? [{
+      header: "Contribución",
+      minWidth: 120,
       flex: true,
-      render: (a: AsociadoFila) => <Badge tone={TONE[a.estadoCuotas]}>{a.estadoCuotas}</Badge>,
+      render: (a: AsociadoFila) => (
+        <span style={{ display: "inline-flex", gap: "6px" }}>
+          <span title={`Cooperadora: ${a.bonoAnualPagado === 1 ? "abonó" : "no abonó"}`}>
+            <Badge tone={a.bonoAnualPagado === 1 ? "ok" : "danger"}>C</Badge>
+          </span>
+          <span title={`Materiales: ${a.materialesPagado === 1 ? "abonó" : "no abonó"}`}>
+            <Badge tone={a.materialesPagado === 1 ? "ok" : "danger"}>M</Badge>
+          </span>
+        </span>
+      ),
     }] : []),
     {
       header: "Acciones",
@@ -448,7 +457,8 @@ export default function Asociados() {
 
   const COLUMNS_PAGOS: Column<PagoFila>[] = [
     { header: "Fecha", width: 120, render: (p) => p.fechaPago },
-    { header: "Período", width: 120, render: (p) => <Badge tone="ok">{p.periodo}</Badge> },
+    { header: "Concepto", width: 210, render: (p) => etiquetaConcepto(p.concepto) },
+    { header: "Año", width: 80, render: (p) => <Badge tone="primary">{p.periodo}</Badge> },
     { header: "Comprobante", width: 140, render: (p) => p.comprobante || `REC-${p.id}` },
     { header: "Medio de pago", width: 140, render: (p) => p.medio },
     {
@@ -513,11 +523,11 @@ export default function Asociados() {
             onChange={setEstado}
           />
           <SelectField
-            label="Estado de cuotas"
-            value={estadoCuotas}
-            width={180}
-            options={["Todos", "Al día", "Con deuda", "Exento"]}
-            onChange={setEstadoCuotas}
+            label="Contribución (algún bono)"
+            value={estadoColaboracion}
+            width={200}
+            options={["Todos", "Colaboró", "No colaboró"]}
+            onChange={setEstadoColaboracion}
           />
         </div>
 
@@ -620,12 +630,12 @@ export default function Asociados() {
                 <label className={s.colCheckboxLabel}>
                   <input
                     type="checkbox"
-                    checked={columnasPersonalizadas.estadoCuotas}
+                    checked={columnasPersonalizadas.colaboracion}
                     onChange={(e) =>
-                      setColumnasPersonalizadas({ ...columnasPersonalizadas, estadoCuotas: e.target.checked })
+                      setColumnasPersonalizadas({ ...columnasPersonalizadas, colaboracion: e.target.checked })
                     }
                   />
-                  <span>Estado de cuotas</span>
+                  <span>Contribución (C cooperadora / M materiales)</span>
                 </label>
 
                 <label className={s.colCheckboxLabel}>
@@ -689,8 +699,15 @@ export default function Asociados() {
         ) : ficha ? (
           <div className={s.fichaContainer}>
             {formError && <div className={s.errorMsg}>{formError}</div>}
-            <Card title={ficha.apellidoNombre}>
+            <Card
+              title={ficha.apellidoNombre}
+              actions={<span className={`${s.socioNumero} ${s.socioNumeroDestacado}`}>Socio N° {String(ficha.id).padStart(4, "0")}</span>}
+            >
               <div className={s.fichaGrid}>
+                <div className={s.fichaItem}>
+                  <span className={s.fichaLabel}>Vínculo</span>
+                  <span className={s.fichaValue}>{etiquetaVinculo(ficha.tipoVinculo)}</span>
+                </div>
                 <div className={s.fichaItem}>
                   <span className={s.fichaLabel}>DNI</span>
                   <span className={s.fichaValue}>{ficha.dni}</span>
@@ -705,16 +722,19 @@ export default function Asociados() {
                 </div>
                 <div className={s.fichaItem}>
                   <span className={s.fichaLabel}>Fecha de alta</span>
-                  <span className={s.fichaValue}>{ficha.fechaAlta}</span>
+                  <span className={s.fichaValue}>{formatearFecha(ficha.fechaAlta)}</span>
                 </div>
                 <div className={s.fichaItem}>
-                  <span className={s.fichaLabel}>Vínculo con la cooperadora</span>
-                  <span className={s.fichaValue}>{etiquetaVinculo(ficha.tipoVinculo)}</span>
+                  <span className={s.fichaLabel}>Hermanos</span>
+                  <span className={s.fichaValue}>
+                    {ficha.tieneHermanos === 1 ? `Sí (${ficha.cantidadAlumnos})` : "No"}
+                  </span>
                 </div>
                 <div className={s.fichaItem}>
-                  <span className={s.fichaLabel}>Estado de cuotas</span>
-                  <div>
-                    <Badge tone={TONE[ficha.estadoCuotas]}>{ficha.estadoCuotas}</Badge>
+                  <span className={s.fichaLabel}>Bono contribución {new Date().getFullYear()}</span>
+                  <div style={{ display: "flex", gap: "var(--space-2)", flexWrap: "wrap" }}>
+                    <Badge tone={ficha.bonoAnualPagado === 1 ? "ok" : "danger"}>Cooperadora</Badge>
+                    <Badge tone={ficha.materialesPagado === 1 ? "ok" : "danger"}>Materiales</Badge>
                   </div>
                 </div>
                 <div className={s.fichaItem}>
@@ -844,25 +864,36 @@ export default function Asociados() {
         {formError && <div className={s.errorMsg}>{formError}</div>}
 
         <Card title="Vínculo con la cooperadora">
-          <SelectField
-            label="Vinculación del asociado"
-            value={formTipoVinculo}
-            options={[
-              { value: "PADRE_TUTOR", label: "Padre, madre o tutor de alumno" },
-              { value: "PERSONAL_ESCOLAR", label: "Personal de la escuela" },
-              { value: "DIRECTIVO_ESCOLAR", label: "Directivo/personal escolar" },
-              { value: "FAMILIAR_RESPONSABLE", label: "Familiar o responsable autorizado" },
-              { value: "COLABORADOR_EXTERNO", label: "Vecino, comercio o entidad colaboradora" },
-              { value: "SIN_VINCULO", label: "Sin vínculo con el establecimiento" },
-              { value: "OTRO", label: "Otro vínculo" },
-            ]}
-            onChange={(valor) => {
-              setFormTipoVinculo(valor);
-              setBusquedaDirectivo("");
-              setDirectivosDropdownOpen(false);
-            }}
-            width="100%"
-          />
+          <div className={s.formRow}>
+            <SelectField
+              label="Vinculación del asociado"
+              value={formTipoVinculo}
+              options={[
+                { value: "PADRE_TUTOR", label: "Padre, madre o tutor de alumno" },
+                { value: "PERSONAL_ESCOLAR", label: "Personal de la escuela" },
+                { value: "DIRECTIVO_ESCOLAR", label: "Directivo/personal escolar" },
+                { value: "FAMILIAR_RESPONSABLE", label: "Familiar o responsable autorizado" },
+                { value: "COLABORADOR_EXTERNO", label: "Vecino, comercio o entidad colaboradora" },
+                { value: "SIN_VINCULO", label: "Sin vínculo con el establecimiento" },
+                { value: "OTRO", label: "Otro vínculo" },
+              ]}
+              onChange={(valor) => {
+                setFormTipoVinculo(valor);
+                setBusquedaDirectivo("");
+                setDirectivosDropdownOpen(false);
+              }}
+              width={420}
+            />
+            {editingId && (
+              <SelectField
+                label="Estado del asociado"
+                value={formActivo ? "Activo" : "Dado de baja"}
+                options={["Activo", "Dado de baja"]}
+                onChange={(v) => setFormActivo(v === "Activo")}
+                width={220}
+              />
+            )}
+          </div>
           {formTipoVinculo === "DIRECTIVO_ESCOLAR" && (
             <div className={s.autocomplete}>
               <Field
@@ -936,29 +967,18 @@ export default function Asociados() {
                 width={300}
               />
             </div>
-          </div>
-        </Card>
-
-        {editingId && (
-          <Card title="Estado del asociado">
             <div className={s.formRow}>
-              <SelectField
-                label="Condición de cuotas"
-                value={formExento ? "Exento" : "No exento"}
-                options={["No exento", "Exento"]}
-                onChange={(v) => setFormExento(v === "Exento")}
-                width={220}
-              />
-              <SelectField
-                label="Estado"
-                value={formActivo ? "Activo" : "Dado de baja"}
-                options={["Activo", "Dado de baja"]}
-                onChange={(v) => setFormActivo(v === "Activo")}
+              <Field
+                label="Fecha de alta"
+                type="date"
+                value={formFechaAlta}
+                max={hoyISO()}
+                onChange={(e) => setFormFechaAlta(e.target.value)}
                 width={220}
               />
             </div>
-          </Card>
-        )}
+          </div>
+        </Card>
 
         <Card title="Alumnos vinculados">
           <div className={s.alumnosForm}>
@@ -990,6 +1010,11 @@ export default function Asociados() {
             <button type="button" className={s.addBtn} onClick={agregarAlumnoRow}>
               + Agregar otro alumno
             </button>
+            <p style={{ margin: 0, color: "var(--color-text-muted)", fontSize: "var(--fs-sm)" }}>
+              {formAlumnos.filter((a) => a.nombre.trim() !== "").length > 1
+                ? "Con dos o más alumnos la familia queda marcada con hermanos y el bono aplica la tarifa con hermanos."
+                : "Con un solo alumno se aplica la tarifa general del bono."}
+            </p>
           </div>
         </Card>
 

@@ -44,10 +44,11 @@ export default function Dashboard() {
     }
   };
 
+  const anioActual = new Date().getFullYear();
   const stats = r && [
     ["Saldo de caja", money(r.saldoCaja)],
-    ["Cuotas cobradas (mes)", `${r.cuotasCobradas} de ${r.cuotasTotal}`],
-    ["Asociados con deuda", String(r.conDeuda)],
+    [`Bono anual ${anioActual}`, `${r.bonosCobrados} de ${r.bonosTotal} familias`],
+    [`Materiales ${anioActual}`, `${r.materialesCobrados} familias`],
     ["Próxima reunión", r.proximaReunion ?? "—"],
   ];
 
@@ -83,7 +84,7 @@ export default function Dashboard() {
           <h2 className={s.actionsTitle}>Acciones rápidas</h2>
           {usuario.rol === "Tesorero" && (
             <>
-              <Button block onClick={() => navigate("cuotas")}>Registrar pago de cuota</Button>
+              <Button block onClick={() => navigate("cuotas")}>Registrar bono contribución</Button>
               <Button block variant="secondary" onClick={() => navigate("caja")}>Nuevo movimiento de caja</Button>
             </>
           )}

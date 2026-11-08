@@ -28,9 +28,16 @@ import {
   DatosFinancierosPia,
 } from "../utils/pdfGenerators";
 import { useApp } from "../context";
+import { importeDelActa } from "../utils/cuadroDesdeRendicion";
 import s from "./Documentacion.module.css";
 
 type Vista = "listado" | "visor";
+
+/** Los importes del acta se guardan como dígitos ("12000"); se convierten para el P.I.A. */
+const aNumero = (valor?: string | number | null) => {
+  const limpio = String(valor ?? "").replace(/\D/g, "");
+  return limpio ? Number(limpio) : 0;
+};
 
 export default function Documentacion() {
   const { usuario } = useApp();
@@ -184,7 +191,7 @@ export default function Documentacion() {
           .filter((m: LineaRendicion) => m.tipo === tipo && buscadas.includes(normalizarCategoria(m.categoria)))
           .reduce((acc, m) => acc + m.total, 0);
       };
-      const ING_MAPEADOS = ["Cuota Social", "Donación de dinero", "Rifas", "Festivales, actos, quermese", "Kiosco", "Intereses bancarios", "Reintegrados banco (débitos, mant., etc.)", "Subsidios de la DGCYE"];
+      const ING_MAPEADOS = ["Bono Contribución", "Cuota Social", "Donación de dinero", "Rifas", "Festivales, actos, quermese", "Kiosco", "Intereses bancarios", "Reintegrados banco (débitos, mant., etc.)", "Subsidios de la DGCYE"];
       const EGR_MAPEADOS = ["Ropa y calzado", "Libros y útiles", "Excursiones", "Emergencias sanitarias", "Golosinas, premios y medallas", "Material didáctico", "Mant. y mejoras con subsidios", "Mant. y mejoras con fondos propios", "Artículos de limpieza", "Combustible y calefacción", "Librería", "Mobiliario", "Organización de rifas", "Organización de festivales", "Kiosco", "Gastos administrativos", "Otros egresos"];
       const kioscoIngreso = totalPor("Ingreso", ["Kiosco"]);
       const kioscoEgreso = totalPor("Egreso", ["Kiosco"]);
@@ -195,37 +202,43 @@ export default function Documentacion() {
         .filter((m: LineaRendicion) => m.tipo === "Egreso" && !EGR_MAPEADOS.includes(m.categoria))
         .reduce((acc, m) => acc + m.total, 0);
 
-      // Lo que la caja no distingue (rifas, kiosco, banco, gastos por alumno) queda en 0 para completar a mano
+      // Los importes salen del acta aprobada en la asamblea (que a su vez se vincula con la
+      // rendición del período). Si el acta no informó un concepto, se usa el total de la caja.
+      const cuadro = acta.cuadroFinanciero;
+      const delActa = (valor: string | undefined, respaldo: number) => importeDelActa(valor, respaldo);
+
+      // El saldo inicial en banco sale del acta de la asamblea (En banco: cuenta corriente + plazo fijo).
       const financiero: DatosFinancierosPia = {
         saldoInicialCaja,
-        saldoInicialBanco: 0,
-        totalCuotas: totalPor("Ingreso", ["Cuota Social"]),
-        totalDonaciones: totalPor("Ingreso", ["Donación de dinero"]),
-        totalRifas: totalPor("Ingreso", ["Rifas"]),
-        totalFestivales: totalPor("Ingreso", ["Festivales, actos, quermese"]),
-        totalKiosco: kioscoIngreso,
-        intereses: totalPor("Ingreso", ["Intereses bancarios"]),
-        reintegrados: totalPor("Ingreso", ["Reintegrados banco (débitos, mant., etc.)"]),
-        subsidios: totalPor("Ingreso", ["Subsidios de la DGCYE"]),
-        otrosIngresosA: otrosIngresos,
-        otrosIngresosB: 0,
-        ropaCalzado: 0,
-        librosUtiles: 0,
-        excursiones: 0,
-        emergencias: 0,
-        golosinasPremios: 0,
-        materialDidactico: totalPor("Egreso", ["Material didáctico"]),
-        mantSubsidios: totalPor("Egreso", ["Mant. y mejoras con subsidios"]),
-        mantFondosPropios: totalPor("Egreso", ["Mant. y mejoras con fondos propios"]),
-        limpieza: totalPor("Egreso", ["Artículos de limpieza"]),
-        combustible: totalPor("Egreso", ["Combustible y calefacción"]),
-        libreria: totalPor("Egreso", ["Librería"]),
-        mobiliario: totalPor("Egreso", ["Mobiliario"]),
-        organizacionRifas: totalPor("Egreso", ["Organización de rifas"]),
-        organizacionFestivales: totalPor("Egreso", ["Organización de festivales"]),
-        gastosKiosco: kioscoEgreso,
-        otrosGastosA: totalPor("Egreso", ["Gastos administrativos"]),
-        otrosGastosB: otrosEgresos,
+        saldoInicialBanco:
+          aNumero(cuadro.cuentaCorriente) + aNumero(cuadro.plazoFijoBanco),
+        totalCuotas: delActa(cuadro.cuotaSocial, totalPor("Ingreso", ["Bono Contribución", "Cuota Social"])),
+        totalDonaciones: delActa(cuadro.donacionDinero, totalPor("Ingreso", ["Donación de dinero"])),
+        totalRifas: delActa(cuadro.rifas, totalPor("Ingreso", ["Rifas"])),
+        totalFestivales: delActa(cuadro.festivales, totalPor("Ingreso", ["Festivales, actos, quermese"])),
+        totalKiosco: delActa(cuadro.kiosco, kioscoIngreso),
+        intereses: delActa(cuadro.interesesBancarios, totalPor("Ingreso", ["Intereses bancarios"])),
+        reintegrados: delActa(cuadro.reintegradosBanco, totalPor("Ingreso", ["Reintegrados banco (débitos, mant., etc.)"])),
+        subsidios: delActa(cuadro.subsidiosDgcye, totalPor("Ingreso", ["Subsidios de la DGCYE"])),
+        otrosIngresosA: delActa(cuadro.otrosIngresosA, otrosIngresos),
+        otrosIngresosB: delActa(cuadro.otrosIngresosB, 0),
+        ropaCalzado: delActa(cuadro.ropaCalzado, totalPor("Egreso", ["Ropa y calzado"])),
+        librosUtiles: delActa(cuadro.librosUtiles, totalPor("Egreso", ["Libros y útiles"])),
+        excursiones: delActa(cuadro.excursiones, totalPor("Egreso", ["Excursiones"])),
+        emergencias: delActa(cuadro.emergenciasSanitarias, totalPor("Egreso", ["Emergencias sanitarias"])),
+        golosinasPremios: delActa(cuadro.golosinasPremiosMedallas, totalPor("Egreso", ["Golosinas, premios y medallas"])),
+        materialDidactico: delActa(cuadro.materialDidactico, totalPor("Egreso", ["Material didáctico"])),
+        mantSubsidios: delActa(cuadro.mantSubsidios, totalPor("Egreso", ["Mant. y mejoras con subsidios"])),
+        mantFondosPropios: delActa(cuadro.mantFondosPropios, totalPor("Egreso", ["Mant. y mejoras con fondos propios"])),
+        limpieza: delActa(cuadro.articulosLimpieza, totalPor("Egreso", ["Artículos de limpieza"])),
+        combustible: delActa(cuadro.combustibleCalefaccion, totalPor("Egreso", ["Combustible y calefacción"])),
+        libreria: delActa(cuadro.libreria, totalPor("Egreso", ["Librería"])),
+        mobiliario: delActa(cuadro.mobiliario, totalPor("Egreso", ["Mobiliario"])),
+        organizacionRifas: delActa(cuadro.organizacionRifas, totalPor("Egreso", ["Organización de rifas"])),
+        organizacionFestivales: delActa(cuadro.organizacionFestivales, totalPor("Egreso", ["Organización de festivales"])),
+        gastosKiosco: delActa(cuadro.kioscoEntidad, kioscoEgreso),
+        otrosGastosA: delActa(cuadro.gastosAdministrativos, totalPor("Egreso", ["Gastos administrativos"])),
+        otrosGastosB: delActa(cuadro.otrosEgresos, otrosEgresos),
         cuotaSocialAprobada: 0,
         cajaChicaAprobada: 0,
         sociosActivos: padron.activos,
