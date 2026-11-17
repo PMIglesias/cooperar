@@ -30,12 +30,6 @@ export default function Login({ onLogin }: { onLogin: (u: Usuario) => void }) {
     }
   };
 
-  const seleccionarDemo = (dniDemo: string) => {
-    setDni(dniDemo);
-    setClave("admin123");
-    setError(null);
-  };
-
   return (
     <div className={s.page}>
       <form className={s.card} onSubmit={submit}>
@@ -68,26 +62,6 @@ export default function Login({ onLogin }: { onLogin: (u: Usuario) => void }) {
         <p className={error ? s.error : s.hint}>
           {error ?? "¿Olvidaste tu contraseña? Pedile al administrador que la restablezca."}
         </p>
-        <div className={s.demoBox}>
-          <p className={s.demoTitle}>Usuarios de prueba (Contraseña: admin123):</p>
-          <div className={s.demoButtons}>
-            <button type="button" className={s.demoBtn} onClick={() => seleccionarDemo("10000001")}>
-              Admin
-            </button>
-            <button type="button" className={s.demoBtn} onClick={() => seleccionarDemo("20000002")}>
-              Presidente
-            </button>
-            <button type="button" className={s.demoBtn} onClick={() => seleccionarDemo("30000003")}>
-              Secretaria
-            </button>
-            <button type="button" className={s.demoBtn} onClick={() => seleccionarDemo("40000004")}>
-              Tesorero
-            </button>
-            <button type="button" className={s.demoBtn} onClick={() => seleccionarDemo("18000000")}>
-              Asesor
-            </button>
-          </div>
-        </div>
       </form>
       <p className={s.footer}>Puente Digital · Cooperar v1.0 · Datos guardados en esta PC</p>
     </div>

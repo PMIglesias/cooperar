@@ -101,6 +101,19 @@
   gap: var(--space-5);
 }
 
+.accountFieldsRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1.3fr) minmax(220px, 1fr);
+  gap: var(--space-5);
+  align-items: start;
+}
+
+@media (max-width: 640px) {
+  .accountFieldsRow {
+    grid-template-columns: 1fr;
+  }
+}
+
 .actionRow {
   display: flex;
   gap: var(--space-4);

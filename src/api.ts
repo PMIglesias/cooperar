@@ -2,7 +2,7 @@
 import { invoke } from "@tauri-apps/api/core";
 
 export type Rol = "Presidente" | "Secretaria" | "Tesorero" | "Superadmin" | "Asesor";
-export interface Usuario { id: number; nombre: string; rol: Rol }
+export interface Usuario { id: number; nombre: string; rol: Rol; debeCambiarClave: boolean }
 export interface Movimiento { descripcion: string; tipo: "Ingreso" | "Egreso"; monto: number }
 export interface ResumenInicio {
   saldoCaja: number;
@@ -456,6 +456,7 @@ export const DEMO_USUARIOS = [
   { dni: "18000000", nombre: "Director/a Escolar", rol: "Asesor" as Rol, clave: "admin123" },
 ];
 
+let mockUsuarioSesion: Usuario | null = null;
 const isTauri = typeof window !== "undefined" && Boolean((window as unknown as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__);
 
 // In-Memory Mock Store for Browser Preview Mode
@@ -586,12 +587,25 @@ export const api = {
     const cleanDni = dni.trim();
     const user = DEMO_USUARIOS.find((u) => u.dni === cleanDni && (u.clave === clave || clave === "admin123"));
     if (user) {
-      return { id: DEMO_USUARIOS.indexOf(user) + 1, nombre: user.nombre, rol: user.rol };
+      mockUsuarioSesion = { id: DEMO_USUARIOS.indexOf(user) + 1, nombre: user.nombre, rol: user.rol, debeCambiarClave: false };
+      return mockUsuarioSesion;
     }
     throw new Error("DNI o contraseña incorrectos");
   },
+  cambiarClaveUsuario: async (claveActual: string | undefined, nuevaClave: string): Promise<Usuario> => {
+    if (isTauri) {
+      return invoke<Usuario>("cambiar_clave_usuario", {
+        claveActual: claveActual ?? null,
+        nuevaClave,
+      });
+    }
+    if (!mockUsuarioSesion) throw new Error("Sesión no iniciada");
+    mockUsuarioSesion = { ...mockUsuarioSesion, debeCambiarClave: false };
+    return mockUsuarioSesion;
+  },
   logout: async (): Promise<void> => {
     if (isTauri) return invoke<void>("logout");
+    mockUsuarioSesion = null;
   },
 
   // Dashboard

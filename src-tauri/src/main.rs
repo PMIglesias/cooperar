@@ -60,6 +60,7 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             commands::login,
             commands::logout,
+            commands::cambiar_clave_usuario,
             commands::resumen_inicio,
             commands::listar_auditoria,
             commands::resumen_padron,

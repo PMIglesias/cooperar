@@ -9,7 +9,9 @@ const SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS usuarios(
   id INTEGER PRIMARY KEY, nombre TEXT NOT NULL, dni TEXT UNIQUE, email TEXT UNIQUE,
   rol TEXT NOT NULL CHECK(rol IN ('Presidente','Secretaria','Tesorero','Superadmin','Asesor')),
-  clave_hash TEXT NOT NULL, activo INTEGER NOT NULL DEFAULT 1);
+  clave_hash TEXT NOT NULL, activo INTEGER NOT NULL DEFAULT 1,
+  comision_directiva_id INTEGER REFERENCES comision_directiva(id) ON DELETE SET NULL,
+  debe_cambiar_clave INTEGER NOT NULL DEFAULT 0);
 CREATE TABLE IF NOT EXISTS asociados(
   id INTEGER PRIMARY KEY, apellido_nombre TEXT NOT NULL, dni TEXT NOT NULL UNIQUE,
   telefono TEXT, email TEXT, fecha_alta TEXT NOT NULL DEFAULT (date('now','localtime')),
@@ -244,6 +246,18 @@ pub fn init(dir: &Path) -> Result<Connection, Box<dyn std::error::Error>> {
     }
 
     conn.execute_batch(SCHEMA)?;
+    let _ = conn.execute(
+        "ALTER TABLE usuarios ADD COLUMN comision_directiva_id INTEGER REFERENCES comision_directiva(id) ON DELETE SET NULL",
+        [],
+    );
+    let _ = conn.execute(
+        "ALTER TABLE usuarios ADD COLUMN debe_cambiar_clave INTEGER NOT NULL DEFAULT 0",
+        [],
+    );
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_usuarios_comision_directiva ON usuarios(comision_directiva_id) WHERE comision_directiva_id IS NOT NULL",
+        [],
+    )?;
     // Un asociado puede abonar el bono anual y los materiales del mismo año: la unicidad
     // pasa a ser por concepto y año lectivo (no por período mensual).
     let _ = conn.execute("DROP INDEX IF EXISTS idx_pagos_asociado_periodo_activo", []);
@@ -412,6 +426,39 @@ pub fn init(dir: &Path) -> Result<Connection, Box<dyn std::error::Error>> {
             [&clave_hash],
         );
     }
+    conn.execute(
+        "UPDATE usuarios
+         SET comision_directiva_id = (
+           SELECT id FROM comision_directiva WHERE dni = usuarios.dni ORDER BY orden LIMIT 1
+         )
+         WHERE rol != 'Superadmin'
+           AND comision_directiva_id IS NULL
+           AND EXISTS (SELECT 1 FROM comision_directiva WHERE dni = usuarios.dni)",
+        [],
+    )?;
+    let claves_iniciales_migradas: bool = conn
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM configuracion WHERE clave='claves_iniciales_forzadas')",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap_or(false);
+    if !claves_iniciales_migradas {
+        let usuarios_con_hash: Vec<(i64, String)> = {
+            let mut stmt = conn.prepare("SELECT id, clave_hash FROM usuarios")?;
+            let rows = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?;
+            rows.collect::<Result<Vec<_>, _>>()?
+        };
+        for (id, clave_hash) in usuarios_con_hash {
+            if verify("admin123", &clave_hash) {
+                conn.execute("UPDATE usuarios SET debe_cambiar_clave=1 WHERE id=?1", [id])?;
+            }
+        }
+        conn.execute(
+            "INSERT OR REPLACE INTO configuracion(clave, valor) VALUES('claves_iniciales_forzadas', '1')",
+            [],
+        )?;
+    }
     let configuraciones_base = [
         ("bono_anual", "12000"),
         ("materiales", "5000"),
@@ -513,4 +560,36 @@ pub fn calcular_cuil_modulo_11(dni_str: &str) -> Option<String> {
         dv = calc_dv(prefijo);
     }
     dv.map(|d| format!("{}-{}-{}", prefijo, padded, d))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn init_links_accounts_and_forces_default_password_change() {
+        let dir = std::env::temp_dir().join(format!("cooperar_db_security_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let conn = init(&dir).expect("Inicializar base de datos");
+
+        let linked: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM usuarios WHERE comision_directiva_id IS NOT NULL",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        let force_change: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM usuarios WHERE debe_cambiar_clave=1",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(linked, 4);
+        assert_eq!(force_change, 5);
+
+        drop(conn);
+        std::fs::remove_dir_all(dir).expect("Limpiar base temporal");
+    }
 }

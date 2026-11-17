@@ -59,6 +59,15 @@ fn test_db_initialization_and_schema() {
         .expect("Usuario Superadmin inicial");
     assert!(db::verify("admin123", &superadmin_hash), "La contraseña inicial 'admin123' debe verificar contra el hash Argon2");
 
+    let linked_users: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM usuarios WHERE comision_directiva_id IS NOT NULL",
+            [],
+            |r| r.get(0),
+        )
+        .expect("Cuentas existentes vinculadas a la nómina");
+    assert_eq!(linked_users, 4, "Las cuentas no administrativas existentes deben vincularse a su cargo");
+
     let _ = fs::remove_dir_all(&test_dir);
 }
 
@@ -1023,9 +1032,9 @@ fn test_saldos_banco_solo_tesoreria_y_auditoria() {
     fs::create_dir_all(&test_dir).expect("Crear dir de test");
     let conn = db::init(&test_dir).expect("Inicializar base de datos");
 
-    let secretaria = commands::Usuario { id: 3, nombre: "Mariana López".to_string(), rol: "Secretaria".to_string() };
-    let presidente = commands::Usuario { id: 2, nombre: "Carlos Gómez".to_string(), rol: "Presidente".to_string() };
-    let tesorero = commands::Usuario { id: 4, nombre: "Roberto Fernández".to_string(), rol: "Tesorero".to_string() };
+    let secretaria = commands::Usuario { id: 3, nombre: "Mariana López".to_string(), rol: "Secretaria".to_string(), debe_cambiar_clave: false };
+    let presidente = commands::Usuario { id: 2, nombre: "Carlos Gómez".to_string(), rol: "Presidente".to_string(), debe_cambiar_clave: false };
+    let tesorero = commands::Usuario { id: 4, nombre: "Roberto Fernández".to_string(), rol: "Tesorero".to_string(), debe_cambiar_clave: false };
 
     // Los saldos en banco sólo los puede modificar la Tesorería (o el Superadmin)
     assert!(commands::guardar_configuracion_interno(&conn, &presidente, "saldo_cuenta_corriente", "250000").is_err());

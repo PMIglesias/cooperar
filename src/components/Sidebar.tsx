@@ -17,12 +17,15 @@ const ITEMS: { route: Route; label: string | [string, string]; labelText: string
   { route: "comision", label: ["Comisión", "Directiva"], labelText: "Comisión Directiva" },
   { route: "usuarios", label: "Usuarios y respaldo", labelText: "Usuarios y respaldo" },
   { route: "historial", label: "Historial", labelText: "Historial de cambios" },
+  { route: "perfil", label: "Mi perfil", labelText: "Perfil de usuario" },
 ];
 
 export default function Sidebar() {
   const { usuario, route, navigate, logout, sidebarCollapsed, toggleSidebar, logoCooperadora } = useApp();
 
   const itemsVisibles = ITEMS.filter((it) => {
+    if (usuario.debeCambiarClave) return it.route === "perfil";
+    if (it.route === "perfil") return true;
     // Superadmin tiene acceso a todo
     if (usuario.rol === "Superadmin") return true;
 

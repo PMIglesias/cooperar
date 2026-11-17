@@ -9,11 +9,24 @@ fn s<E: ToString>(e: E) -> String { e.to_string() }
 
 #[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
-pub struct Usuario { pub id: i64, pub nombre: String, pub rol: String }
+pub struct Usuario {
+    pub id: i64,
+    pub nombre: String,
+    pub rol: String,
+    pub debe_cambiar_clave: bool,
+}
 
-fn auth(st: &State<AppState>) -> R<Usuario> {
+fn auth_sin_restricciones(st: &State<AppState>) -> R<Usuario> {
     let g = st.sesion.lock().map_err(s)?;
     g.clone().ok_or_else(|| "Sesión no iniciada".to_string())
+}
+
+fn auth(st: &State<AppState>) -> R<Usuario> {
+    let usuario = auth_sin_restricciones(st)?;
+    if usuario.debe_cambiar_clave {
+        return Err("Debe cambiar su contraseña antes de continuar".to_string());
+    }
+    Ok(usuario)
 }
 
 fn auth_superadmin(st: &State<AppState>) -> R<Usuario> {
@@ -124,18 +137,72 @@ pub fn listar_auditoria(st: State<AppState>) -> R<Vec<AuditoriaFila>> {
 #[tauri::command]
 pub fn login(st: State<AppState>, dni: String, clave: String) -> R<Usuario> {
     let msg = "DNI o contraseña incorrectos".to_string();
-    let found: (Usuario, String) = {
+    let found = {
         let db = st.db.lock().map_err(s)?;
-        db.query_row(
-            "SELECT id,nombre,rol,clave_hash FROM usuarios WHERE activo=1 AND dni=?1",
-            params![dni.trim()],
-            |r| Ok((Usuario { id: r.get(0)?, nombre: r.get(1)?, rol: r.get(2)? }, r.get(3)?)),
-        )
-        .map_err(|_| msg.clone())?
+        let found: Option<(Usuario, String, String, Option<String>, Option<String>)> = db
+            .query_row(
+                "SELECT u.id, COALESCE(c.nombre, u.nombre), u.rol, u.clave_hash,
+                        u.debe_cambiar_clave, u.dni, c.dni, c.cargo
+                 FROM usuarios u
+                 LEFT JOIN comision_directiva c ON c.id=u.comision_directiva_id
+                 WHERE u.activo=1
+                   AND ((u.rol='Superadmin' AND u.dni=?1) OR (u.rol!='Superadmin' AND c.dni=?1))
+                 ORDER BY CASE WHEN c.dni=?1 THEN 0 ELSE 1 END
+                 LIMIT 1",
+                params![dni.trim()],
+                |r| {
+                    Ok((
+                        Usuario {
+                            id: r.get(0)?,
+                            nombre: r.get(1)?,
+                            rol: r.get(2)?,
+                            debe_cambiar_clave: r.get::<_, i64>(4)? != 0,
+                        },
+                        r.get(3)?,
+                        r.get(5)?,
+                        r.get(6)?,
+                        r.get(7)?,
+                    ))
+                },
+            )
+            .optional()
+            .map_err(s)?;
+        let (mut usuario, hash, usuario_dni, nomina_dni, cargo_nomina) =
+            found.ok_or_else(|| msg.clone())?;
+        if let Some(cargo) = cargo_nomina.as_deref() {
+            if rol_para_cargo(cargo) != Some(usuario.rol.as_str()) {
+                return Err(msg);
+            }
+        }
+        if !db::verify(&clave, &hash) {
+            return Err(msg);
+        }
+        if let Some(ref dni_actual) = nomina_dni {
+            if usuario_dni != *dni_actual {
+                if dni.trim() != dni_actual {
+                    return Err(msg);
+                }
+                let new_hash = db::hash(dni_actual);
+                usuario.debe_cambiar_clave = true;
+                db.execute(
+                    "UPDATE usuarios
+                     SET nombre=?1, dni=?2, clave_hash=?3, debe_cambiar_clave=1
+                     WHERE id=?4",
+                    params![usuario.nombre, dni_actual, new_hash, usuario.id],
+                )
+                .map_err(s)?;
+            } else {
+                db.execute(
+                    "UPDATE usuarios SET nombre=?1 WHERE id=?2 AND nombre != ?1",
+                    params![usuario.nombre, usuario.id],
+                )
+                .map_err(s)?;
+            }
+        }
+        usuario
     };
-    if !db::verify(&clave, &found.1) { return Err(msg); }
-    *st.sesion.lock().map_err(s)? = Some(found.0.clone());
-    Ok(found.0)
+    *st.sesion.lock().map_err(s)? = Some(found.clone());
+    Ok(found)
 }
 
 #[tauri::command]
@@ -1525,11 +1592,101 @@ pub struct UsuarioFila {
     pub activo: i64,
 }
 
+fn rol_para_cargo(cargo: &str) -> Option<&'static str> {
+    let cargo = cargo.to_uppercase();
+    if cargo.starts_with("PRESIDENTE") {
+        Some("Presidente")
+    } else if cargo.starts_with("SECRETAR") {
+        Some("Secretaria")
+    } else if cargo.starts_with("TESORER") {
+        Some("Tesorero")
+    } else if cargo.contains("ASESOR") {
+        Some("Asesor")
+    } else {
+        None
+    }
+}
+
+fn buscar_persona_nomina(db: &Connection, rol: &str) -> R<(i64, String, String, String)> {
+    let cargo = match rol {
+        "Presidente" => "PRESIDENTE%",
+        "Secretaria" => "SECRETAR%",
+        "Tesorero" => "TESORER%",
+        "Asesor" => "%ASESOR%",
+        _ => return Err("El rol no corresponde a una persona de la nómina".to_string()),
+    };
+    db.query_row(
+        "SELECT id, nombre, dni, cargo FROM comision_directiva
+         WHERE UPPER(cargo) LIKE ?1 ORDER BY orden LIMIT 1",
+        params![cargo],
+        |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+    )
+    .optional()
+    .map_err(s)?
+    .ok_or_else(|| format!("No hay una persona con el cargo de {rol} en la nómina actual"))
+}
+
+pub fn validar_clave_segura(clave: &str) -> R<()> {
+    let cumple = clave.chars().count() >= 8
+        && clave.chars().any(char::is_uppercase)
+        && clave.chars().any(char::is_lowercase)
+        && clave.chars().any(char::is_numeric)
+        && clave.chars().any(|c| !c.is_alphanumeric() && !c.is_whitespace());
+    if cumple {
+        Ok(())
+    } else {
+        Err("La contraseña debe tener al menos 8 caracteres e incluir mayúscula, minúscula, número y símbolo".to_string())
+    }
+}
+
+#[cfg(test)]
+mod usuarios_tests {
+    use super::*;
+
+    #[test]
+    fn valida_requisitos_de_contrasena() {
+        assert!(validar_clave_segura("Aa1!bcde").is_ok());
+        assert!(validar_clave_segura("A1!bcde").is_err());
+        assert!(validar_clave_segura("Abcdefgh").is_err());
+        assert!(validar_clave_segura("ABCD123!").is_err());
+    }
+
+    #[test]
+    fn busca_persona_segun_rol_en_nomina() {
+        let db = Connection::open_in_memory().unwrap();
+        db.execute_batch(
+            "CREATE TABLE comision_directiva(id INTEGER, orden INTEGER, cargo TEXT, nombre TEXT, dni TEXT);
+             INSERT INTO comision_directiva VALUES
+               (1, 1, 'PRESIDENTE', 'Ana Pérez', '12345678'),
+               (2, 2, 'SECRETARIO', 'Luis Díaz', '23456789'),
+               (3, 3, 'TESORERO', 'Eva Ruiz', '34567890'),
+               (4, 4, 'ASESOR', 'Sol Paz', '45678901');",
+        )
+        .unwrap();
+
+        assert_eq!(
+            buscar_persona_nomina(&db, "Secretaria").unwrap(),
+            (2, "Luis Díaz".to_string(), "23456789".to_string(), "SECRETARIO".to_string()),
+        );
+        assert!(buscar_persona_nomina(&db, "Superadmin").is_err());
+        assert!(buscar_persona_nomina(&db, "Tesorero").is_ok());
+    }
+}
+
 #[tauri::command]
 pub fn listar_usuarios(st: State<AppState>) -> R<Vec<UsuarioFila>> {
     auth_superadmin_o_asesor(&st)?;
     let db = st.db.lock().map_err(s)?;
-    let mut q = db.prepare("SELECT u.id, u.nombre, u.dni, CASE WHEN u.rol='Superadmin' THEN NULL ELSE c.cargo END, u.rol, u.activo FROM usuarios u LEFT JOIN comision_directiva c ON c.dni = u.dni ORDER BY u.id").map_err(s)?;
+    let mut q = db.prepare(
+        "SELECT u.id, COALESCE(c.nombre, u.nombre), COALESCE(c.dni, u.dni),
+                CASE WHEN u.rol='Superadmin' THEN NULL ELSE c.cargo END, u.rol, u.activo
+         FROM usuarios u
+         LEFT JOIN comision_directiva c ON c.id=COALESCE(
+           u.comision_directiva_id,
+           (SELECT id FROM comision_directiva WHERE dni=u.dni ORDER BY orden LIMIT 1)
+         )
+         ORDER BY u.id"
+    ).map_err(s)?;
     let rows = q.query_map([], |r| {
         Ok(UsuarioFila {
             id: r.get(0)?, nombre: r.get(1)?, dni: r.get(2)?, cargo: r.get(3)?,
@@ -1552,12 +1709,28 @@ pub struct DatosUsuario {
 #[tauri::command]
 pub fn crear_usuario(st: State<AppState>, datos: DatosUsuario) -> R<i64> {
     let u = auth_superadmin(&st)?;
+    if datos.rol == "Superadmin" {
+        return Err("No se permite crear cuentas Superadmin desde esta pantalla".to_string());
+    }
     let db = st.db.lock().map_err(s)?;
-    let clave = datos.clave.unwrap_or_else(|| "admin123".to_string());
+    let (comision_id, nombre, dni, _) = buscar_persona_nomina(&db, &datos.rol)?;
+    let existente: Option<String> = db
+        .query_row(
+            "SELECT nombre FROM usuarios WHERE comision_directiva_id=?1",
+            params![comision_id],
+            |r| r.get(0),
+        )
+        .optional()
+        .map_err(s)?;
+    if existente.is_some() {
+        return Err(format!("Ya existe una cuenta vinculada a {nombre}"));
+    }
+    let clave = datos.clave.filter(|c| !c.is_empty()).unwrap_or_else(|| dni.clone());
     let hash_str = db::hash(&clave);
     db.execute(
-        "INSERT INTO usuarios(nombre, dni, email, rol, clave_hash) VALUES(?1, ?2, NULL, ?3, ?4)",
-        params![datos.nombre.trim(), datos.dni.trim(), datos.rol.trim(), hash_str],
+        "INSERT INTO usuarios(nombre, dni, email, rol, clave_hash, comision_directiva_id, debe_cambiar_clave)
+         VALUES(?1, ?2, NULL, ?3, ?4, ?5, 1)",
+        params![nombre, dni, datos.rol.trim(), hash_str, comision_id],
     ).map_err(s)?;
     let id = db.last_insert_rowid();
     auditar(&db, u.id, "CREAR", "usuario", Some(id))?;
@@ -1568,18 +1741,89 @@ pub fn crear_usuario(st: State<AppState>, datos: DatosUsuario) -> R<i64> {
 pub fn actualizar_usuario(st: State<AppState>, id: i64, datos: DatosUsuario) -> R<()> {
     let u = auth_superadmin(&st)?;
     let db = st.db.lock().map_err(s)?;
-    if let Some(ref c) = datos.clave {
-        if !c.trim().is_empty() {
-            let hash_str = db::hash(c.trim());
-            db.execute("UPDATE usuarios SET clave_hash=?1 WHERE id=?2", params![hash_str, id]).map_err(s)?;
-        }
+    let rol_actual: String = db
+        .query_row("SELECT rol FROM usuarios WHERE id=?1", params![id], |r| r.get(0))
+        .optional()
+        .map_err(s)?
+        .ok_or_else(|| "La cuenta de usuario no existe".to_string())?;
+    if datos.rol == "Superadmin" && rol_actual != "Superadmin" {
+        return Err("No se permite asignar el rol Superadmin desde esta pantalla".to_string());
     }
-    db.execute(
-        "UPDATE usuarios SET nombre=?1, dni=?2, email=NULL, rol=?3 WHERE id=?4",
-        params![datos.nombre.trim(), datos.dni.trim(), datos.rol.trim(), id],
-    ).map_err(s)?;
+    let clave = datos.clave.filter(|c| !c.is_empty());
+    if id == u.id && clave.is_some() {
+        return Err("Para cambiar la contraseña de su propia cuenta, use Perfil de usuario".to_string());
+    }
+    let hash_str = clave.map(|c| db::hash(&c));
+    if datos.rol == "Superadmin" {
+        db.execute(
+            "UPDATE usuarios SET nombre=?1, dni=?2, email=NULL, rol=?3,
+                    clave_hash=COALESCE(?4, clave_hash),
+                    debe_cambiar_clave=CASE WHEN ?4 IS NULL THEN debe_cambiar_clave ELSE 1 END
+             WHERE id=?5",
+            params![datos.nombre.trim(), datos.dni.trim(), datos.rol, hash_str, id],
+        ).map_err(s)?;
+    } else {
+        let (comision_id, nombre, dni, _) = buscar_persona_nomina(&db, &datos.rol)?;
+        let existente: Option<i64> = db
+            .query_row(
+                "SELECT id FROM usuarios WHERE comision_directiva_id=?1 AND id<>?2",
+                params![comision_id, id],
+                |r| r.get(0),
+            )
+            .optional()
+            .map_err(s)?;
+        if existente.is_some() {
+            return Err(format!("Ya existe otra cuenta vinculada a {nombre}"));
+        }
+        db.execute(
+            "UPDATE usuarios SET nombre=?1, dni=?2, email=NULL, rol=?3,
+                    clave_hash=COALESCE(?4, clave_hash),
+                    debe_cambiar_clave=CASE WHEN ?4 IS NULL THEN debe_cambiar_clave ELSE 1 END,
+                    comision_directiva_id=?5
+             WHERE id=?6",
+            params![nombre, dni, datos.rol, hash_str, comision_id, id],
+        ).map_err(s)?;
+    }
     auditar(&db, u.id, "ACTUALIZAR", "usuario", Some(id))?;
     Ok(())
+}
+
+#[tauri::command]
+pub fn cambiar_clave_usuario(
+    st: State<AppState>,
+    clave_actual: Option<String>,
+    nueva_clave: String,
+) -> R<Usuario> {
+    let mut usuario = auth_sin_restricciones(&st)?;
+    validar_clave_segura(&nueva_clave)?;
+    let db = st.db.lock().map_err(s)?;
+    let (hash_actual, debe_cambiar): (String, i64) = db
+        .query_row(
+            "SELECT clave_hash, debe_cambiar_clave FROM usuarios WHERE id=?1 AND activo=1",
+            params![usuario.id],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .map_err(s)?;
+    if debe_cambiar == 0
+        && !clave_actual
+            .as_deref()
+            .is_some_and(|clave| db::verify(clave, &hash_actual))
+    {
+        return Err("La contraseña actual es incorrecta".to_string());
+    }
+    if db::verify(&nueva_clave, &hash_actual) {
+        return Err("La nueva contraseña debe ser diferente de la actual".to_string());
+    }
+    let hash_nuevo = db::hash(&nueva_clave);
+    db.execute(
+        "UPDATE usuarios SET clave_hash=?1, debe_cambiar_clave=0 WHERE id=?2",
+        params![hash_nuevo, usuario.id],
+    )
+    .map_err(s)?;
+    auditar(&db, usuario.id, "CAMBIAR_CLAVE", "usuario", Some(usuario.id))?;
+    usuario.debe_cambiar_clave = false;
+    *st.sesion.lock().map_err(s)? = Some(usuario.clone());
+    Ok(usuario)
 }
 
 #[tauri::command]

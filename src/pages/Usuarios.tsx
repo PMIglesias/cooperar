@@ -4,6 +4,7 @@ import {
   api,
   UsuarioFila,
   CopiaSeguridadFila,
+  MiembroComisionFila,
   Rol,
 } from "../api";
 import Layout from "../components/Layout";
@@ -19,12 +20,21 @@ import s from "./Usuarios.module.css";
 import { useApp } from "../context";
 
 const ROLES: { value: Rol; label: string }[] = [
-  { value: "Superadmin", label: "Superadministrador (Acceso total)" },
   { value: "Presidente", label: "Presidente de Cooperadora" },
   { value: "Secretaria", label: "Secretario/a (Padrones y Actas)" },
   { value: "Tesorero", label: "Tesorero/a (Caja y Cobranzas)" },
   { value: "Asesor", label: "Asesor (Sólo lectura)" },
 ];
+const ROL_SUPERADMIN = { value: "Superadmin" as Rol, label: "Superadministrador (Acceso total)" };
+
+function cargoCorrespondeAlRol(cargo: string, rol: Rol) {
+  const normalizado = cargo.toLocaleUpperCase();
+  if (rol === "Presidente") return normalizado.startsWith("PRESIDENTE");
+  if (rol === "Secretaria") return normalizado.startsWith("SECRETAR");
+  if (rol === "Tesorero") return normalizado.startsWith("TESORER");
+  if (rol === "Asesor") return normalizado.includes("ASESOR");
+  return false;
+}
 
 export default function Usuarios() {
   const { usuario } = useApp();
@@ -41,6 +51,13 @@ export default function Usuarios() {
   const [userClave, setUserClave] = useState("");
   const [userSaving, setUserSaving] = useState(false);
   const [userError, setUserError] = useState<string | null>(null);
+  const [nomina, setNomina] = useState<MiembroComisionFila[]>([]);
+  const [cargandoNomina, setCargandoNomina] = useState(false);
+  const [nominaError, setNominaError] = useState<string | null>(null);
+  const personaSeleccionada = nomina.find((miembro) => cargoCorrespondeAlRol(miembro.cargo, userRol));
+  const opcionesRol = editingUserId && userRol === "Superadmin"
+    ? [...ROLES, ROL_SUPERADMIN]
+    : ROLES;
 
   // --- TAB RESPALDO ---
   const [copias, setCopias] = useState<CopiaSeguridadFila[]>([]);
@@ -64,16 +81,30 @@ export default function Usuarios() {
 
   // Manejadores Usuarios
   const abrirNuevoUsuario = () => {
+    setNomina([]);
+    setNominaError(null);
+    setCargandoNomina(true);
+    api.listarComisionDirectiva()
+      .then(setNomina)
+      .catch((err) => setNominaError(String(err).replace(/^Error:\s*/, "")))
+      .finally(() => setCargandoNomina(false));
     setEditingUserId(null);
     setUserNombre("");
     setUserDni("");
     setUserRol("Secretaria");
-    setUserClave("admin123");
+    setUserClave("");
     setUserError(null);
     setVista("formulario");
   };
 
   const abrirEditarUsuario = (u: UsuarioFila) => {
+    setNomina([]);
+    setNominaError(null);
+    setCargandoNomina(true);
+    api.listarComisionDirectiva()
+      .then(setNomina)
+      .catch((err) => setNominaError(String(err).replace(/^Error:\s*/, "")))
+      .finally(() => setCargandoNomina(false));
     setEditingUserId(u.id);
     setUserNombre(u.nombre);
     setUserDni(u.dni);
@@ -85,7 +116,14 @@ export default function Usuarios() {
 
   const guardarUsuario = async (e: FormEvent) => {
     e.preventDefault();
-    if (!userNombre.trim() || !userDni.trim()) {
+    const persona = nomina.find((miembro) => cargoCorrespondeAlRol(miembro.cargo, userRol));
+    const nombre = userRol === "Superadmin" ? userNombre.trim() : persona?.nombre.trim() ?? "";
+    const dni = userRol === "Superadmin" ? userDni.trim() : persona?.dni.trim() ?? "";
+    if (!nombre || !dni) {
+      setUserError(nominaError || `No hay una persona con cargo de ${userRol} en la nómina actual.`);
+      return;
+    }
+    if (userRol === "Superadmin" && (!userNombre.trim() || !userDni.trim())) {
       setUserError("El nombre y el DNI son obligatorios.");
       return;
     }
@@ -95,17 +133,17 @@ export default function Usuarios() {
     try {
       if (editingUserId) {
         await api.actualizarUsuario(editingUserId, {
-          nombre: userNombre.trim(),
-          dni: userDni.trim(),
+          nombre,
+          dni,
           rol: userRol,
-          clave: userClave.trim() || undefined,
+          clave: userClave || undefined,
         });
       } else {
         await api.crearUsuario({
-          nombre: userNombre.trim(),
-          dni: userDni.trim(),
+          nombre,
+          dni,
           rol: userRol,
-          clave: userClave.trim() || "admin123",
+          clave: userClave || undefined,
         });
       }
       cargarUsuarios();
@@ -456,22 +494,24 @@ export default function Usuarios() {
 
         <Card title="Datos de la cuenta">
           <div className={s.formFields}>
-            <div className={s.formRow}>
+            <div className={s.accountFieldsRow}>
               <Field
                 label="Nombre y apellido"
-                placeholder="Ej: Laura Martínez"
-                value={userNombre}
+                placeholder={userRol === "Superadmin" ? "Ej: Laura Martínez" : "Se completa desde la nómina"}
+                value={userRol === "Superadmin" ? userNombre : personaSeleccionada?.nombre ?? ""}
                 onChange={(e) => setUserNombre(e.target.value)}
-                width={340}
+                width="100%"
                 required
+                readOnly={userRol !== "Superadmin"}
               />
               <Field
                 label="DNI (utilizado para ingresar)"
-                placeholder="Ej: 35123456"
-                value={userDni}
+                placeholder={userRol === "Superadmin" ? "Ej: 35123456" : "Se completa desde la nómina"}
+                value={userRol === "Superadmin" ? userDni : personaSeleccionada?.dni ?? ""}
                 onChange={(e) => setUserDni(e.target.value)}
-                width={200}
+                width="100%"
                 required
+                readOnly={userRol !== "Superadmin"}
               />
             </div>
 
@@ -479,25 +519,40 @@ export default function Usuarios() {
               <SelectField
                 label="Rol de acceso"
                 value={userRol}
-                options={ROLES}
+                options={opcionesRol}
                 onChange={(v) => setUserRol(v as Rol)}
                 width={280}
               />
             </div>
+            {cargandoNomina && <p>Cargando nómina actual…</p>}
+            {nominaError && <div className={s.errorMsg}>No se pudo consultar la nómina: {nominaError}</div>}
+            {!cargandoNomina && !nominaError && userRol !== "Superadmin" && (
+              <p>
+                {personaSeleccionada
+                  ? `Persona vinculada desde la nómina: ${personaSeleccionada.cargo}.`
+                  : `No hay una persona con cargo de ${userRol} en la nómina actual; completá la nómina antes de crear esta cuenta.`}
+              </p>
+            )}
 
             <Field
-              label={editingUserId ? "Contraseña (dejar en blanco para conservar la actual)" : "Contraseña de acceso"}
+              label={editingUserId ? "Nueva contraseña (dejar en blanco para conservar la actual)" : "Contraseña inicial (opcional)"}
               type="password"
-              placeholder={editingUserId ? "••••••••" : "admin123"}
+              placeholder={editingUserId ? "Dejar en blanco para conservarla" : "Vacío: se usará el DNI"}
               value={userClave}
               onChange={(e) => setUserClave(e.target.value)}
               width={340}
             />
+            {!editingUserId && (
+              <p>La contraseña inicial será el DNI si dejás este campo vacío. En el primer ingreso, el usuario deberá cambiarla.</p>
+            )}
           </div>
         </Card>
 
         <div className={s.actionRow}>
-          <Button type="submit" disabled={userSaving}>
+          <Button
+            type="submit"
+            disabled={userSaving || (userRol !== "Superadmin" && (cargandoNomina || Boolean(nominaError) || !personaSeleccionada))}
+          >
             {userSaving ? "Guardando..." : editingUserId ? "Guardar cambios" : "Crear usuario"}
           </Button>
           <Button

@@ -14,6 +14,7 @@ import Documentacion from "./pages/Documentacion";
 import ComisionDirectiva from "./pages/ComisionDirectiva";
 import Usuarios from "./pages/Usuarios";
 import Historial from "./pages/Historial";
+import Perfil from "./pages/Perfil";
 
 export default function App() {
   const [usuario, setUsuario] = useState<Usuario | null>(null);
@@ -41,14 +42,20 @@ export default function App() {
     });
   };
 
-  if (!usuario) return <Login onLogin={setUsuario} />;
+  const iniciarSesion = (nuevoUsuario: Usuario) => {
+    setUsuario(nuevoUsuario);
+    setRoute(nuevoUsuario.debeCambiarClave ? "perfil" : "inicio");
+  };
+
+  if (!usuario) return <Login onLogin={iniciarSesion} />;
 
   const logout = () => {
     api.logout().finally(() => { setUsuario(null); setRoute("inicio"); });
   };
 
   let page;
-  if (route === "inicio") page = <Dashboard />;
+  if (usuario.debeCambiarClave || route === "perfil") page = <Perfil />;
+  else if (route === "inicio") page = <Dashboard />;
   else if (route === "asociados") page = <Asociados />;
   else if (route === "cuotas") page = <Cuotas />;
   else if (route === "caja") page = <Caja />;
@@ -66,7 +73,10 @@ export default function App() {
       value={{
         usuario,
         route,
-        navigate: setRoute,
+        navigate: (nextRoute) => {
+          if (!usuario.debeCambiarClave || nextRoute === "perfil") setRoute(nextRoute);
+        },
+        setUsuario,
         logout,
         sidebarCollapsed,
         toggleSidebar,
@@ -77,4 +87,4 @@ export default function App() {
       {page}
     </AppContext.Provider>
   );
-}
+}
